@@ -1,26 +1,177 @@
-@import "tailwindcss";
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+/* LáriScan — Sistema de Inspección de Calidad Textil */
+/* Paleta de colores cálidos de la tierra mexicana */
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Colores principales */
+  --tierra: #7C4A2D;
+  --arcilla: #B5622A;
+  --maiz: #D4973A;
+  --nopal: #4A6741;
+  --obsidiana: #1C1410;
+  --arena: #F2E8D5;
+  --lino: #EAD9BC;
+  --humo: #7A6A5A;
+
+  /* Semantic tokens */
+  --background: #F2E8D5;
+  --foreground: #1C1410;
+  --card: #EAD9BC;
+  --card-foreground: #1C1410;
+  --popover: #EAD9BC;
+  --popover-foreground: #1C1410;
+  --primary: #7C4A2D;
+  --primary-foreground: #F2E8D5;
+  --secondary: #EAD9BC;
+  --secondary-foreground: #1C1410;
+  --muted: #EAD9BC;
+  --muted-foreground: #7A6A5A;
+  --accent: #B5622A;
+  --accent-foreground: #F2E8D5;
+  --destructive: #7C4A2D;
+  --destructive-foreground: #F2E8D5;
+  --border: #7C4A2D;
+  --input: #EAD9BC;
+  --ring: #B5622A;
+  
+  /* Estados */
+  --success: #4A6741;
+  --success-foreground: #F2E8D5;
+  --warning: #D4973A;
+  --warning-foreground: #1C1410;
+  --processing: #B5622A;
+  
+  /* Charts */
+  --chart-1: #7C4A2D;
+  --chart-2: #B5622A;
+  --chart-3: #D4973A;
+  --chart-4: #4A6741;
+  --chart-5: #7A6A5A;
+  
+  --radius: 0.5rem;
 }
 
 @theme inline {
+  --font-sans: 'Nunito', sans-serif;
+  --font-serif: 'Fraunces', serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  
+  --color-tierra: var(--tierra);
+  --color-arcilla: var(--arcilla);
+  --color-maiz: var(--maiz);
+  --color-nopal: var(--nopal);
+  --color-obsidiana: var(--obsidiana);
+  --color-arena: var(--arena);
+  --color-lino: var(--lino);
+  --color-humo: var(--humo);
+  
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-processing: var(--processing);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-arena text-obsidiana;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Textura sutil de fibra tejida */
+.texture-fiber {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.03'/%3E%3C/svg%3E");
+}
+
+/* Patrón de grecas zapotecas */
+.greca-border {
+  background-image: repeating-linear-gradient(
+    90deg,
+    var(--tierra) 0px,
+    var(--tierra) 8px,
+    transparent 8px,
+    transparent 12px,
+    var(--tierra) 12px,
+    var(--tierra) 16px,
+    transparent 16px,
+    transparent 24px
+  );
+  background-size: 24px 2px;
+  background-repeat: repeat-x;
+  height: 2px;
+}
+
+/* Animación pulsante para estado EN PROCESO */
+@keyframes pulse-processing {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.animate-processing {
+  animation: pulse-processing 1.5s ease-in-out infinite;
+}
+
+/* Bordes robustos */
+.border-robust {
+  border-width: 2px;
+}
+
+/* Botones táctiles grandes */
+.btn-tactile {
+  min-height: 56px;
+  font-size: 1.125rem;
+  font-weight: 600;
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+}
+
+/* Estilos de impresión */
+@media print {
+  body {
+    background: white !important;
+  }
+  
+  .print\:hidden {
+    display: none !important;
+  }
+  
+  .texture-fiber {
+    background-image: none !important;
+  }
 }
