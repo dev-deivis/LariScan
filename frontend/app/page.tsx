@@ -23,9 +23,15 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analizandoRef = useRef(false);
+
+  // #3 — loop en cadena
+  const loopActivoRef = useRef(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // #1 — trackear estado anterior para contar solo transiciones
+  const anteriorTeniaDefectoRef = useRef(false);
 
   const [camaraActiva, setCamaraActiva] = useState(false);
   const [pausado, setPausado] = useState(false);
@@ -33,6 +39,8 @@ export default function Home() {
   const [resultadoVivo, setResultadoVivo] = useState<Resultado | null>(null);
   const [procesando, setProcesando] = useState(false);
   const [contadorDefectos, setContadorDefectos] = useState(0);
+  const [errorRed, setErrorRed] = useState(false);  // #2
+  const [iniciando, setIniciando] = useState(false); // #4
 
   // ── Helpers modo imagen ──────────────────────────────────────────────────
   const analizar = async (file: File) => {
@@ -92,30 +100,37 @@ export default function Home() {
     if (!ctx2d) return;
     ctx2d.drawImage(video, 0, 0);
 
-    canvas.toBlob(async (blob) => {
-      if (!blob) return;
-      analizandoRef.current = true;
-      setProcesando(true);
-      const formData = new FormData();
-      formData.append("file", new File([blob], "frame.jpg", { type: "image/jpeg" }));
-      try {
-        const res = await fetch("http://localhost:8000/analizar", {
-          method: "POST",
-          body: formData,
-        });
-        const data: Resultado = await res.json();
-        setResultadoVivo(data);
-        if (data.tiene_defecto) {
-          setContadorDefectos((c) => c + 1);
-          reproducirBeep();
-        }
-      } catch {
-        // fallo silencioso en modo vivo
-      } finally {
-        analizandoRef.current = false;
-        setProcesando(false);
+    // Promisificado para que el loop en cadena pueda awaitearlo (#3)
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, "image/jpeg", 0.85);
+    });
+    if (!blob) return;
+
+    analizandoRef.current = true;
+    setProcesando(true);
+    const formData = new FormData();
+    formData.append("file", new File([blob], "frame.jpg", { type: "image/jpeg" }));
+    try {
+      const res = await fetch("http://localhost:8000/analizar", {
+        method: "POST",
+        body: formData,
+      });
+      const data: Resultado = await res.json();
+      setResultadoVivo(data);
+      setErrorRed(false); // #2 — recuperado
+
+      // #1 — solo incrementar cuando cambia false → true
+      if (data.tiene_defecto && !anteriorTeniaDefectoRef.current) {
+        setContadorDefectos((c) => c + 1);
+        reproducirBeep();
       }
-    }, "image/jpeg", 0.85);
+      anteriorTeniaDefectoRef.current = data.tiene_defecto;
+    } catch {
+      setErrorRed(true); // #2 — mostrar badge de error
+    } finally {
+      analizandoRef.current = false;
+      setProcesando(false);
+    }
   }, [reproducirBeep]);
 
   // ── Iniciar cámara ───────────────────────────────────────────────────────
@@ -123,6 +138,7 @@ export default function Home() {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
     }
+    setIniciando(true); // #4
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: frontal ? "user" : "environment" },
@@ -134,42 +150,62 @@ export default function Home() {
       setCamaraActiva(true);
       setPausado(false);
       setResultadoVivo(null);
+      anteriorTeniaDefectoRef.current = false; // #1 — reset al iniciar
     } catch {
       alert("No se pudo acceder a la cámara. Verifica los permisos del navegador.");
+    } finally {
+      setIniciando(false); // #4
     }
   }, []);
 
   // ── Detener cámara ───────────────────────────────────────────────────────
   const detenerCamara = useCallback(() => {
+    loopActivoRef.current = false; // #3 — detener loop
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
-    }
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
     }
     setCamaraActiva(false);
     setResultadoVivo(null);
     setPausado(false);
     setProcesando(false);
+    setErrorRed(false);    // #2
+    setIniciando(false);   // #4
     analizandoRef.current = false;
+    anteriorTeniaDefectoRef.current = false; // #1
   }, []);
 
-  // ── Gestionar intervalo de análisis ─────────────────────────────────────
+  // ── #3 — Loop en cadena: await respuesta + pausa 500ms ──────────────────
   useEffect(() => {
-    if (camaraActiva && !pausado) {
-      intervalRef.current = setInterval(capturarYAnalizar, 2000);
-    } else {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
+    if (!camaraActiva || pausado) {
+      loopActivoRef.current = false;
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
       }
+      return;
     }
+
+    loopActivoRef.current = true;
+
+    const loop = async () => {
+      if (!loopActivoRef.current) return;
+      await capturarYAnalizar();
+      if (!loopActivoRef.current) return;
+      timeoutRef.current = setTimeout(loop, 500);
+    };
+
+    loop();
+
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
+      loopActivoRef.current = false;
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
       }
     };
   }, [camaraActiva, pausado, capturarYAnalizar]);
@@ -297,12 +333,20 @@ export default function Home() {
         <div className="w-full max-w-lg flex flex-col items-center gap-3 sm:gap-4">
 
           {/* Barra de estado */}
-          <div className="flex gap-2 sm:gap-3 w-full items-center">
+          <div className="flex gap-2 sm:gap-3 w-full items-center flex-wrap">
             <div className="flex-1 bg-white border border-gray-200 rounded-xl px-3 sm:px-4 py-2 text-xs sm:text-sm text-gray-600">
               Defectos:{" "}
               <span className="font-bold text-red-600">{contadorDefectos}</span>
             </div>
-            {procesando && (
+
+            {/* #2 — badge de error de red */}
+            {errorRed && (
+              <div className="bg-yellow-50 border border-yellow-400 rounded-xl px-2.5 sm:px-3 py-2 text-xs text-yellow-700 whitespace-nowrap">
+                ⚠ Sin conexión con backend
+              </div>
+            )}
+
+            {procesando && !errorRed && (
               <div className="bg-blue-50 border border-blue-200 rounded-xl px-2.5 sm:px-3 py-2 text-xs text-blue-600 animate-pulse whitespace-nowrap">
                 Analizando...
               </div>
@@ -314,12 +358,12 @@ export default function Home() {
             )}
           </div>
 
-          {/* Feed de cámara con overlay */}
+          {/* Feed de cámara con overlay — #5: aspect ratio 16/9 */}
           <div
             className={`relative w-full rounded-xl overflow-hidden bg-black ${
               resultadoVivo?.tiene_defecto ? "ring-4 ring-red-500 ring-opacity-80" : ""
             }`}
-            style={{ aspectRatio: "4/3" }}
+            style={{ aspectRatio: "16/9" }}
           >
             <video
               ref={videoRef}
@@ -330,13 +374,24 @@ export default function Home() {
             />
             <canvas ref={canvasRef} className="hidden" />
 
-            {/* Placeholder sin cámara */}
+            {/* #4 — Placeholder: spinner al iniciar, instrucción cuando está idle */}
             {!camaraActiva && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 sm:gap-3 bg-gray-900">
-                <span className="text-4xl sm:text-5xl">🎥</span>
-                <p className="text-gray-300 text-xs sm:text-sm text-center px-6">
-                  Presiona &quot;Iniciar cámara&quot; para comenzar el análisis en vivo
-                </p>
+                {iniciando ? (
+                  <>
+                    <div className="w-8 h-8 border-4 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                    <p className="text-gray-300 text-xs sm:text-sm text-center px-6">
+                      Iniciando cámara...
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-4xl sm:text-5xl">🎥</span>
+                    <p className="text-gray-300 text-xs sm:text-sm text-center px-6">
+                      Presiona &quot;Iniciar cámara&quot; para comenzar el análisis en vivo
+                    </p>
+                  </>
+                )}
               </div>
             )}
 
@@ -371,9 +426,10 @@ export default function Home() {
           {!camaraActiva ? (
             <button
               onClick={() => iniciarCamara(camaraFrontal)}
-              className="w-full py-3.5 bg-blue-600 text-white rounded-xl font-medium text-sm sm:text-base hover:bg-blue-700 active:scale-95 transition-all"
+              disabled={iniciando} // #4
+              className="w-full py-3.5 bg-blue-600 text-white rounded-xl font-medium text-sm sm:text-base hover:bg-blue-700 active:scale-95 transition-all disabled:opacity-60 disabled:cursor-not-allowed disabled:active:scale-100"
             >
-              Iniciar cámara
+              {iniciando ? "Iniciando..." : "Iniciar cámara"}
             </button>
           ) : (
             <div className="grid grid-cols-3 gap-2 sm:gap-3 w-full">
@@ -405,7 +461,7 @@ export default function Home() {
 
           {/* Ayuda */}
           <p className="text-xs text-gray-400 text-center px-2">
-            Análisis automático cada 2 segundos.
+            Análisis continuo: espera respuesta del modelo + 500ms entre capturas.
             {camaraActiva && " Suena una alerta al detectar defecto."}
           </p>
         </div>
