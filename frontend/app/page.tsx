@@ -48,6 +48,8 @@ export default function InspeccionActiva() {
   const [zonaAdvertenciaPct, setZonaAdvertenciaPct] = useState(80)
   const [anchoRolloIn, setAnchoRolloIn] = useState(45)
   const [largoRolloYd, setLargoRolloYd] = useState(120)
+  const [framesCalibracion, setFramesCalibracion] = useState(5)
+  const [framesConfirmacion, setFramesConfirmacion] = useState(3)
 
   const totalPuntos = defectos.reduce((sum, d) => sum + d.puntos, 0)
   // ASTM D5430: (puntos × 36 × 100) / (ancho_in × largo_yd)
@@ -64,6 +66,7 @@ export default function InspeccionActiva() {
   const anteriorTeniaDefectoRef = useRef(false)
 
   const [camaraActiva, setCamaraActiva] = useState(false)
+  const [pausado, setPausado] = useState(false)
   const [camaraFrontal, setCamaraFrontal] = useState(false)
   const [resultadoVivo, setResultadoVivo] = useState<Resultado | null>(null)
   const [procesando, setProcesando] = useState(false)
@@ -77,7 +80,7 @@ export default function InspeccionActiva() {
   const [resultadoColor, setResultadoColor] = useState<ResultadoColor | null>(null)
   const [calibrando, setCalibrando] = useState(false)
   const [contadorCalibracion, setContadorCalibracion] = useState(0)
-  const [contadorColorFuera, setContadorColorFuera] = useState(0)
+  const contadorColorFueraRef = useRef(0)
 
   const [imagen, setImagen] = useState<string | null>(null)
   const [resultadoImagen, setResultadoImagen] = useState<Resultado | null>(null)
@@ -93,6 +96,8 @@ export default function InspeccionActiva() {
         setAnchoRolloIn(d.ancho_rollo_in ?? 45)
         setLargoRolloYd(d.largo_rollo_yd ?? 120)
         setAatccActivo(d.aatcc_173_activo ?? false)
+        setFramesCalibracion(d.aatcc_frames_calibracion ?? 5)
+        setFramesConfirmacion(d.aatcc_frames_confirmacion ?? 3)
       })
       .catch(() => {})
   }, [])
@@ -160,7 +165,6 @@ export default function InspeccionActiva() {
     formData.append("file", new File([blob], "frame.jpg", { type: "image/jpeg" }))
 
     // Análisis YOLO (siempre)
-    let tieneDefecto = false
     try {
       const res = await fetch("http://localhost:8000/analizar", {
         method: "POST",
@@ -169,7 +173,6 @@ export default function InspeccionActiva() {
       const data: Resultado = await res.json()
       setResultadoVivo(data)
       setErrorRed(false)
-      tieneDefecto = data.tiene_defecto
 
       if (data.tiene_defecto && !anteriorTeniaDefectoRef.current) {
         setContadorDefectos((c) => c + 1)
@@ -190,11 +193,7 @@ export default function InspeccionActiva() {
       setErrorRed(true)
     }
 
-    // Análisis AATCC 173 (si está activo)
-    const config = await fetch("http://localhost:8000/configuracion").then(r => r.json()).catch(() => ({}))
-    const framesCalibracion = config.aatcc_frames_calibracion ?? 5
-    const framesConfirmacion = config.aatcc_frames_confirmacion ?? 3
-
+    // Análisis AATCC 173 (si está activo) — usa valores cargados al inicio, no fetch por frame
     if (aatccActivo) {
       if (refColor && !calibrando) {
         // Ya hay referencia: comparar
@@ -213,13 +212,12 @@ export default function InspeccionActiva() {
           setResultadoColor(dataColor)
 
           if (dataColor.fuera_tolerancia) {
-            const nuevosFramesFuera = contadorColorFuera + 1
-            setContadorColorFuera(nuevosFramesFuera)
-            if (nuevosFramesFuera >= framesConfirmacion) {
+            contadorColorFueraRef.current += 1
+            if (contadorColorFueraRef.current >= framesConfirmacion) {
               reproducirBeep()
             }
           } else {
-            setContadorColorFuera(0)
+            contadorColorFueraRef.current = 0
           }
         } catch {
           // Error en análisis de color, ignorar
@@ -251,7 +249,7 @@ export default function InspeccionActiva() {
     }
 
     setProcesando(false)
-  }, [reproducirBeep, aatccActivo, refColor, calibrando, contadorCalibracion, contadorColorFuera])
+  }, [reproducirBeep, aatccActivo, refColor, calibrando, contadorCalibracion, framesCalibracion, framesConfirmacion])
 
   const iniciarCamara = useCallback(async (frontal: boolean) => {
     if (streamRef.current) {
@@ -274,7 +272,7 @@ export default function InspeccionActiva() {
       if (aatccActivo) {
         setRefColor(null)
         setContadorCalibracion(0)
-        setContadorColorFuera(0)
+        contadorColorFueraRef.current = 0
         setCalibrando(true)
       }
     } catch {
@@ -295,6 +293,7 @@ export default function InspeccionActiva() {
       streamRef.current = null
     }
     setCamaraActiva(false)
+    setPausado(false)
     setResultadoVivo(null)
     setProcesando(false)
     setErrorRed(false)
@@ -303,7 +302,7 @@ export default function InspeccionActiva() {
   }, [])
 
   useEffect(() => {
-    if (!camaraActiva || modo !== "vivo") {
+    if (!camaraActiva || modo !== "vivo" || pausado) {
       loopActivoRef.current = false
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current)
@@ -330,7 +329,7 @@ export default function InspeccionActiva() {
         timeoutRef.current = null
       }
     }
-  }, [camaraActiva, modo, capturarYAnalizar])
+  }, [camaraActiva, pausado, modo, capturarYAnalizar])
 
   useEffect(() => () => detenerCamara(), [detenerCamara])
 
@@ -438,6 +437,8 @@ export default function InspeccionActiva() {
             videoRef={videoRef}
             canvasRef={canvasRef}
             camaraActiva={camaraActiva}
+            pausado={pausado}
+            setPausado={setPausado}
             camaraFrontal={camaraFrontal}
             resultadoVivo={resultadoVivo}
             procesando={procesando}
@@ -800,7 +801,7 @@ function ModoImagen({
 }
 
 function ModoVideoVivo({
-  videoRef, canvasRef, camaraActiva, camaraFrontal, resultadoVivo, procesando,
+  videoRef, canvasRef, camaraActiva, pausado, setPausado, camaraFrontal, resultadoVivo, procesando,
   errorRed, iniciando, contadorDefectos, metrosInspeccionados, velocidadMpm,
   setVelocidadMpm, iniciarCamara, detenerCamara, setCamaraFrontal,
   aatccActivo, refColor, resultadoColor, calibrando, contadorCalibracion
@@ -808,6 +809,8 @@ function ModoVideoVivo({
   videoRef: React.RefObject<HTMLVideoElement | null>
   canvasRef: React.RefObject<HTMLCanvasElement | null>
   camaraActiva: boolean
+  pausado: boolean
+  setPausado: (v: boolean) => void
   camaraFrontal: boolean
   resultadoVivo: Resultado | null
   procesando: boolean
@@ -976,18 +979,28 @@ function ModoVideoVivo({
           {iniciando ? "Iniciando..." : "Iniciar cámara"}
         </button>
       ) : (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-3 gap-3">
+          <button
+            onClick={() => setPausado(!pausado)}
+            className={`py-3 rounded-xl font-medium transition-all active:scale-95 border-2 ${
+              pausado
+                ? "bg-nopal text-arena border-nopal hover:bg-nopal/90"
+                : "bg-maiz text-obsidiana border-maiz hover:bg-maiz/90"
+            }`}
+          >
+            {pausado ? "▶ Reanudar" : "⏸ Pausar"}
+          </button>
           <button
             onClick={cambiarCamara}
             className="py-3 bg-lino text-tierra border-2 border-tierra rounded-xl font-medium hover:bg-arena transition-all active:scale-95"
           >
-            🔄 Cambiar a {camaraFrontal ? "trasera" : "frontal"}
+            🔄 {camaraFrontal ? "Trasera" : "Frontal"}
           </button>
           <button
             onClick={detenerCamara}
             className="py-3 bg-red-100 text-red-600 rounded-xl font-medium hover:bg-red-200 transition-all active:scale-95"
           >
-            Detener cámara
+            Detener
           </button>
         </div>
       )}
