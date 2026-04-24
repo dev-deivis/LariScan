@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Volume2,
   User,
+  Shield,
   Pencil,
 } from "lucide-react"
 import Link from "next/link"
@@ -37,6 +38,7 @@ const navItems = [
   { href: "/normas", icon: Settings, label: "Normas" },
   { href: "/validacion", icon: CheckCircle2, label: "Validar" },
   { href: "/reporte", icon: FileText, label: "Reporte" },
+  { href: "/auditoria", icon: Shield, label: "Auditoría" },
 ]
 
 const TURNOS = ["Matutino", "Vespertino", "Nocturno"]
