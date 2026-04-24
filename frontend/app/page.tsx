@@ -5,7 +5,7 @@ import { AppShell } from "@/components/lariscan/app-shell"
 import { ScoreDisplay, ScoreCard } from "@/components/lariscan/score-display"
 import { StatusBadge } from "@/components/lariscan/status-badge"
 import { GrecaSeparator } from "@/components/lariscan/greca-separator"
-import { Pause, Play, RotateCcw, AlertCircle, Eye, Camera, Upload, Video, AlertTriangle, CheckCircle } from "lucide-react"
+import { Pause, Play, RotateCcw, AlertCircle, Eye, Camera, Upload, Video, AlertTriangle, CheckCircle, XCircle, ClipboardList } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 type Resultado = {
@@ -399,7 +399,91 @@ function DashboardView({
   setMetrosInspeccionados: (v: number) => void
   setDefectos: (v: Defecto[]) => void
 }) {
+  const [mostrarVeredicto, setMostrarVeredicto] = useState(false)
+  const aprobado = parseFloat(puntosASTM) <= limiteAceptable
+
+  const finalizar = () => {
+    setIsPaused(true)
+    setMostrarVeredicto(true)
+  }
+
+  const nuevaInspeccion = () => {
+    setMetrosInspeccionados(0)
+    setDefectos([])
+    setIsPaused(false)
+    setMostrarVeredicto(false)
+  }
+
   return (
+    <>
+      {/* Modal de veredicto */}
+      {mostrarVeredicto && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-obsidiana/80 backdrop-blur-sm">
+          <div className={cn(
+            "w-full max-w-md rounded-3xl p-8 text-center border-4 space-y-6",
+            aprobado ? "bg-arena border-nopal" : "bg-arena border-red-500"
+          )}>
+            <div className={cn(
+              "w-24 h-24 rounded-full mx-auto flex items-center justify-center",
+              aprobado ? "bg-nopal" : "bg-red-500"
+            )}>
+              {aprobado
+                ? <CheckCircle className="w-14 h-14 text-arena" />
+                : <XCircle className="w-14 h-14 text-white" />
+              }
+            </div>
+
+            <div>
+              <p className={cn("font-serif text-5xl font-bold", aprobado ? "text-nopal" : "text-red-600")}>
+                {aprobado ? "APROBADO" : "RECHAZADO"}
+              </p>
+              <p className="text-humo mt-2 text-sm">Inspección finalizada — {new Date().toLocaleString("es-MX")}</p>
+            </div>
+
+            <div className="bg-lino rounded-2xl p-4 space-y-3 text-left border border-tierra/20">
+              <div className="flex justify-between items-center">
+                <span className="text-humo text-sm">Puntaje ASTM D5430</span>
+                <span className={cn("font-mono font-bold text-lg", aprobado ? "text-nopal" : "text-red-600")}>
+                  {puntosASTM} pts/100yd²
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-humo text-sm">Límite aceptable</span>
+                <span className="font-mono font-bold text-obsidiana">{limiteAceptable} pts/100yd²</span>
+              </div>
+              <div className="h-px bg-tierra/20" />
+              <div className="flex justify-between items-center">
+                <span className="text-humo text-sm">Defectos detectados</span>
+                <span className="font-mono font-bold text-obsidiana">{defectos.length}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-humo text-sm">Puntos acumulados</span>
+                <span className="font-mono font-bold text-obsidiana">{totalPuntos} pts</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-humo text-sm">Metros inspeccionados</span>
+                <span className="font-mono font-bold text-obsidiana">{metrosInspeccionados.toFixed(1)} m</span>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={nuevaInspeccion}
+                className="flex-1 py-3 bg-tierra text-arena rounded-xl font-semibold hover:bg-tierra/90 transition-all"
+              >
+                Nueva inspección
+              </button>
+              <button
+                onClick={() => setMostrarVeredicto(false)}
+                className="flex-1 py-3 bg-arena text-tierra border-2 border-tierra rounded-xl font-semibold hover:bg-lino transition-all"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div className="lg:col-span-2 space-y-4">
         <div className="relative bg-obsidiana rounded-2xl overflow-hidden border-2 border-tierra aspect-video">
@@ -461,7 +545,7 @@ function DashboardView({
           >
             {isPaused ? <><Play className="w-6 h-6" /> Reanudar</> : <><Pause className="w-6 h-6" /> Pausar</>}
           </button>
-          <button 
+          <button
             onClick={() => { setMetrosInspeccionados(0); setDefectos([]); }}
             className="btn-tactile px-6 rounded-xl bg-lino text-tierra border-2 border-tierra hover:bg-arena transition-all flex items-center gap-2"
           >
@@ -469,6 +553,13 @@ function DashboardView({
             <span className="hidden md:inline">Reiniciar</span>
           </button>
         </div>
+        <button
+          onClick={finalizar}
+          className="w-full btn-tactile rounded-xl bg-tierra text-arena border-2 border-tierra hover:bg-tierra/90 transition-all flex items-center justify-center gap-2"
+        >
+          <ClipboardList className="w-5 h-5" />
+          Finalizar inspección
+        </button>
       </div>
 
       <div className="space-y-4">
@@ -535,6 +626,7 @@ function DashboardView({
         </div>
       </div>
     </div>
+  </>
   )
 }
 
