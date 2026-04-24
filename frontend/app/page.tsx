@@ -32,9 +32,11 @@ export default function InspeccionActiva() {
   const [metrosInspeccionados, setMetrosInspeccionados] = useState(45.2)
   const [defectos, setDefectos] = useState<Defecto[]>([])
 
+  const [limiteAceptable, setLimiteAceptable] = useState(40)
+  const [zonaAdvertenciaPct, setZonaAdvertenciaPct] = useState(80)
+
   const totalPuntos = defectos.reduce((sum, d) => sum + d.puntos, 0)
   const puntosASTM = metrosInspeccionados > 0 ? (totalPuntos / (metrosInspeccionados / 91.44) * 100).toFixed(1) : "0"
-  const limiteAceptable = 40
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -58,6 +60,16 @@ export default function InspeccionActiva() {
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
+    fetch("http://localhost:8000/configuracion")
+      .then((r) => r.json())
+      .then((d) => {
+        setLimiteAceptable(d.umbral_pts ?? 40)
+        setZonaAdvertenciaPct(d.zona_advertencia_pct ?? 80)
+      })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
     if (isPaused || modo !== "dashboard") return
     const interval = setInterval(() => {
       setMetrosInspeccionados((m) => m + 0.1)
@@ -67,8 +79,8 @@ export default function InspeccionActiva() {
 
   const getEstadoPuntaje = () => {
     const pts = parseFloat(puntosASTM)
-    if (pts <= limiteAceptable * 0.6) return "success"
-    if (pts <= limiteAceptable * 0.85) return "warning"
+    const umbralAdvertencia = limiteAceptable * (zonaAdvertenciaPct / 100)
+    if (pts <= umbralAdvertencia) return "success"
     if (pts <= limiteAceptable) return "warning"
     return "danger"
   }
