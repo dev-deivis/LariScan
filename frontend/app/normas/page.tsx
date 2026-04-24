@@ -19,6 +19,12 @@ interface ConfigForm {
   regla2Continuo: boolean
   regla3RechazoAuto: boolean
   preset: string
+  aatcc173Activo: boolean
+  aatccToleranciaH: number
+  aatccToleranciaS: number
+  aatccToleranciaV: number
+  aatccFramesConfirmacion: number
+  aatccFramesCalibracion: number
 }
 
 interface LogEntry {
@@ -39,6 +45,12 @@ const CONFIG_DEFAULT: ConfigForm = {
   regla2Continuo: true,
   regla3RechazoAuto: true,
   preset: "exportacion",
+  aatcc173Activo: false,
+  aatccToleranciaH: 15,
+  aatccToleranciaS: 15,
+  aatccToleranciaV: 15,
+  aatccFramesConfirmacion: 3,
+  aatccFramesCalibracion: 5,
 }
 
 const PRESETS = [
@@ -70,7 +82,7 @@ const PRESETS = [
 
 const NORMAS = [
   { id: "ASTM D5430", desc: "Sistema de 4 puntos — defectos por tamaño", disponible: true },
-  { id: "AATCC 173", desc: "Uniformidad de color — análisis HSV", disponible: false },
+  { id: "AATCC 173", desc: "Uniformidad de color — análisis HSV", disponible: true },
   { id: "Manual", desc: "Evaluación subjetiva del inspector", disponible: false },
 ]
 
@@ -105,6 +117,12 @@ export default function ConfiguracionNormas() {
           regla2Continuo: d.regla_continuo ?? true,
           regla3RechazoAuto: d.regla_rechazo_auto ?? true,
           preset: d.preset ?? "exportacion",
+          aatcc173Activo: d.aatcc_173_activo ?? false,
+          aatccToleranciaH: d.aatcc_tolerancia_h ?? 15,
+          aatccToleranciaS: d.aatcc_tolerancia_s ?? 15,
+          aatccToleranciaV: d.aatcc_tolerancia_v ?? 15,
+          aatccFramesConfirmacion: d.aatcc_frames_confirmacion ?? 3,
+          aatccFramesCalibracion: d.aatcc_frames_calibracion ?? 5,
         })
       })
       .catch(() => {})
@@ -148,6 +166,12 @@ export default function ConfiguracionNormas() {
         regla_continuo: form.regla2Continuo,
         regla_rechazo_auto: form.regla3RechazoAuto,
         preset: form.preset,
+        aatcc_173_activo: form.aatcc173Activo,
+        aatcc_tolerancia_h: form.aatccToleranciaH,
+        aatcc_tolerancia_s: form.aatccToleranciaS,
+        aatcc_tolerancia_v: form.aatccToleranciaV,
+        aatcc_frames_confirmacion: form.aatccFramesConfirmacion,
+        aatcc_frames_calibracion: form.aatccFramesCalibracion,
       }
       const res = await fetch(`${BACKEND}/configuracion`, {
         method: "POST",
@@ -192,35 +216,125 @@ export default function ConfiguracionNormas() {
 
         <GrecaSeparator />
 
-        {/* Sección 1: Norma activa */}
+        {/* Sección 1: Normas activas */}
         <div className="bg-lino border-2 border-tierra rounded-2xl p-6">
-          <h2 className="font-serif text-xl font-bold text-tierra mb-4">Norma activa</h2>
+          <h2 className="font-serif text-xl font-bold text-tierra mb-1">Normas activas</h2>
+          <p className="text-sm text-humo mb-4">
+            ASTM D5430 es la norma base siempre activa. AATCC 173 corre en paralelo como complemento opcional.
+          </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {NORMAS.map((n) => (
-              <button
-                key={n.id}
-                disabled={!n.disponible}
-                onClick={() => n.disponible && setForm((f) => ({ ...f, norma: n.id }))}
-                className={cn(
-                  "p-4 rounded-xl border-2 text-left transition-all",
-                  form.norma === n.id ? "border-arcilla bg-arcilla/10" : "border-tierra/30",
-                  n.disponible ? "hover:border-tierra cursor-pointer" : "opacity-50 cursor-not-allowed"
-                )}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <p className="font-semibold text-obsidiana text-sm">{n.id}</p>
-                  {form.norma === n.id && <CheckCircle2 className="w-4 h-4 text-nopal" />}
-                  {!n.disponible && (
-                    <span className="text-xs text-humo bg-humo/20 px-2 py-0.5 rounded">
-                      Próximamente
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-humo">{n.desc}</p>
-              </button>
-            ))}
+            {/* ASTM D5430 — siempre activa */}
+            <div className="p-4 rounded-xl border-2 border-arcilla bg-arcilla/10 cursor-default">
+              <div className="flex items-center justify-between mb-1">
+                <p className="font-semibold text-obsidiana text-sm">ASTM D5430</p>
+                <span className="text-xs bg-nopal text-arena px-2 py-0.5 rounded font-medium">
+                  Siempre activa
+                </span>
+              </div>
+              <p className="text-xs text-humo">Sistema de 4 puntos — defectos por tamaño</p>
+            </div>
+            {/* AATCC 173 — toggle complementario */}
+            <button
+              onClick={() => setForm((f) => ({ ...f, aatcc173Activo: !f.aatcc173Activo }))}
+              className={cn(
+                "p-4 rounded-xl border-2 text-left transition-all hover:border-tierra",
+                form.aatcc173Activo ? "border-arcilla bg-arcilla/10" : "border-tierra/30"
+              )}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <p className="font-semibold text-obsidiana text-sm">AATCC 173</p>
+                {form.aatcc173Activo
+                  ? <CheckCircle2 className="w-4 h-4 text-nopal" />
+                  : <span className="text-xs text-humo bg-humo/20 px-2 py-0.5 rounded">Opcional</span>
+                }
+              </div>
+              <p className="text-xs text-humo">Uniformidad de color — análisis HSV</p>
+            </button>
+            {/* Manual — próximamente */}
+            <div className="p-4 rounded-xl border-2 border-tierra/30 opacity-50 cursor-not-allowed">
+              <div className="flex items-center justify-between mb-1">
+                <p className="font-semibold text-obsidiana text-sm">Manual</p>
+                <span className="text-xs text-humo bg-humo/20 px-2 py-0.5 rounded">Próximamente</span>
+              </div>
+              <p className="text-xs text-humo">Evaluación subjetiva del inspector</p>
+            </div>
           </div>
         </div>
+
+        {/* AATCC 173 — configuración de tolerancias */}
+        {form.aatcc173Activo && (
+          <div className="bg-lino border-2 border-tierra rounded-2xl p-6">
+            <h2 className="font-serif text-xl font-bold text-tierra mb-1">
+              Configuración AATCC 173
+            </h2>
+            <p className="text-sm text-humo mb-4">
+              Tolerancias para detectar variación de color entre secciones del rollo (espacio HSV)
+            </p>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-humo mb-2">
+                  Tolerancia H <span className="font-mono text-xs">(°)</span>
+                </label>
+                <input
+                  type="number" value={form.aatccToleranciaH} min={1} max={90}
+                  onChange={(e) => setForm((f) => ({ ...f, aatccToleranciaH: parseFloat(e.target.value) || 0 }))}
+                  className="w-full px-4 py-3 bg-arena border-2 border-tierra/30 rounded-xl focus:border-tierra focus:outline-none font-mono text-lg font-bold"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-humo mb-2">
+                  Tolerancia S <span className="font-mono text-xs">(%)</span>
+                </label>
+                <input
+                  type="number" value={form.aatccToleranciaS} min={1} max={100}
+                  onChange={(e) => setForm((f) => ({ ...f, aatccToleranciaS: parseFloat(e.target.value) || 0 }))}
+                  className="w-full px-4 py-3 bg-arena border-2 border-tierra/30 rounded-xl focus:border-tierra focus:outline-none font-mono text-lg font-bold"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-humo mb-2">
+                  Tolerancia V <span className="font-mono text-xs">(%)</span>
+                </label>
+                <input
+                  type="number" value={form.aatccToleranciaV} min={1} max={100}
+                  onChange={(e) => setForm((f) => ({ ...f, aatccToleranciaV: parseFloat(e.target.value) || 0 }))}
+                  className="w-full px-4 py-3 bg-arena border-2 border-tierra/30 rounded-xl focus:border-tierra focus:outline-none font-mono text-lg font-bold"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4 mt-4">
+              <div>
+                <label className="block text-sm font-medium text-humo mb-2">
+                  Frames de calibración
+                </label>
+                <input
+                  type="number" value={form.aatccFramesCalibracion} min={3} max={30}
+                  onChange={(e) => setForm((f) => ({ ...f, aatccFramesCalibracion: parseInt(e.target.value) || 1 }))}
+                  className="w-full px-4 py-3 bg-arena border-2 border-tierra/30 rounded-xl focus:border-tierra focus:outline-none font-mono text-lg font-bold"
+                />
+                <p className="text-xs text-humo mt-1">Frames iniciales para capturar el color de referencia</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-humo mb-2">
+                  Frames de confirmación
+                </label>
+                <input
+                  type="number" value={form.aatccFramesConfirmacion} min={1} max={10}
+                  onChange={(e) => setForm((f) => ({ ...f, aatccFramesConfirmacion: parseInt(e.target.value) || 1 }))}
+                  className="w-full px-4 py-3 bg-arena border-2 border-tierra/30 rounded-xl focus:border-tierra focus:outline-none font-mono text-lg font-bold"
+                />
+                <p className="text-xs text-humo mt-1">Frames consecutivos fuera de rango para activar alerta</p>
+              </div>
+            </div>
+            <div className="mt-4 bg-maiz/20 rounded-xl p-3 border border-maiz/40 flex items-start gap-3">
+              <Info className="w-5 h-5 text-maiz flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-obsidiana">
+                Los primeros <strong>{form.aatccFramesCalibracion} frames</strong> al iniciar la cámara se usarán
+                automáticamente para calibrar el color de referencia del rollo.
+              </p>
+            </div>
+          </div>
+        )}
 
         {form.norma === "ASTM D5430" && (
           <>

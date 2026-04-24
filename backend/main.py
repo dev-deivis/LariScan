@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, Request
+from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
@@ -9,6 +9,8 @@ from typing import Optional, List
 from datetime import datetime, timedelta
 from fpdf import FPDF
 import io, json, hashlib, datetime as dt
+import cv2
+import numpy as np
 
 from database import get_db, engine
 import models
@@ -53,6 +55,12 @@ _config: dict = {
     "regla_continuo": True,
     "regla_rechazo_auto": True,
     "preset": "exportacion",
+    "aatcc_173_activo": False,
+    "aatcc_tolerancia_h": 15.0,
+    "aatcc_tolerancia_s": 15.0,
+    "aatcc_tolerancia_v": 15.0,
+    "aatcc_frames_confirmacion": 3,
+    "aatcc_frames_calibracion": 5,
 }
 _log: list = []
 
@@ -91,6 +99,12 @@ class ConfigNormaIn(BaseModel):
     regla_continuo: bool
     regla_rechazo_auto: bool
     preset: str
+    aatcc_173_activo: bool = False
+    aatcc_tolerancia_h: float = 15.0
+    aatcc_tolerancia_s: float = 15.0
+    aatcc_tolerancia_v: float = 15.0
+    aatcc_frames_confirmacion: int = 3
+    aatcc_frames_calibracion: int = 5
 
 
 class CalcularPuntosIn(BaseModel):
@@ -211,6 +225,7 @@ def _resumen(r: models.Reporte) -> dict:
     }
 
 
+<<<<<<< HEAD
 # ── PDF ───────────────────────────────────────────────────────────────────────
 def _s(text) -> str:
     """Sanitize text to Latin-1 — replaces em/en dashes and any non-Latin-1 char."""
@@ -399,6 +414,66 @@ async def analizar(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Error al analizar: {str(e)}")
 
 
+# ── Endpoint AATCC 173: análisis de uniformidad de color ────────────────────
+@app.post("/analizar-color")
+async def analizar_color(
+    file: UploadFile = File(...),
+    ref_h: Optional[float] = Form(None),
+    ref_s: Optional[float] = Form(None),
+    ref_v: Optional[float] = Form(None),
+):
+    contenido = await file.read()
+    img_arr = np.frombuffer(contenido, np.uint8)
+    img_bgr = cv2.imdecode(img_arr, cv2.IMREAD_COLOR)
+    img_hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+
+    # Excluir píxeles muy oscuros (fondo, sombras)
+    mascara = img_hsv[:, :, 2] > 30
+    if not mascara.any():
+        mascara = np.ones(img_hsv.shape[:2], dtype=bool)
+
+    h_mean = float(img_hsv[:, :, 0][mascara].mean())
+    s_mean = float(img_hsv[:, :, 1][mascara].mean())
+    v_mean = float(img_hsv[:, :, 2][mascara].mean())
+
+    if ref_h is None or ref_s is None or ref_v is None:
+        return {"h": round(h_mean, 1), "s": round(s_mean, 1), "v": round(v_mean, 1),
+                "desviacion_pct": None, "fuera_tolerancia": None}
+
+    tol_h = float(_config.get("aatcc_tolerancia_h", 15.0))
+    tol_s = float(_config.get("aatcc_tolerancia_s", 15.0))
+    tol_v = float(_config.get("aatcc_tolerancia_v", 15.0))
+
+    # Hue: distancia circular (OpenCV: 0-179 → representa 0-360°)
+    diff_h = abs(h_mean - ref_h)
+    delta_h_deg = min(diff_h, 180.0 - diff_h) * 2.0  # en grados reales (0-180)
+
+    # Saturación y Valor: diferencia porcentual (escala 0-255 → 0-100%)
+    delta_s_pct = abs(s_mean - ref_s) / 255.0 * 100.0
+    delta_v_pct = abs(v_mean - ref_v) / 255.0 * 100.0
+
+    fuera = (delta_h_deg > tol_h) or (delta_s_pct > tol_s) or (delta_v_pct > tol_v)
+
+    # Desviación normalizada 0-100 para la barra de UI
+    desv_h = min(delta_h_deg / 180.0 * 100.0, 100.0)
+    desv_s = min(delta_s_pct, 100.0)
+    desv_v = min(delta_v_pct, 100.0)
+    desviacion_pct = round(max(desv_h, desv_s, desv_v), 1)
+
+    return {
+        "h": round(h_mean, 1),
+        "s": round(s_mean, 1),
+        "v": round(v_mean, 1),
+        "delta_h_deg": round(delta_h_deg, 1),
+        "delta_s_pct": round(delta_s_pct, 1),
+        "delta_v_pct": round(delta_v_pct, 1),
+        "desviacion_pct": desviacion_pct,
+        "fuera_tolerancia": fuera,
+    }
+
+
+
+# ── Endpoints de configuración ───────────────────────────────────────────────
 @app.get("/configuracion")
 def get_configuracion():
     return _config

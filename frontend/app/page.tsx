@@ -5,13 +5,24 @@ import { AppShell } from "@/components/lariscan/app-shell"
 import { ScoreDisplay, ScoreCard } from "@/components/lariscan/score-display"
 import { StatusBadge } from "@/components/lariscan/status-badge"
 import { GrecaSeparator } from "@/components/lariscan/greca-separator"
-import { Pause, Play, RotateCcw, AlertCircle, Eye, Camera, Upload, Video, AlertTriangle, CheckCircle } from "lucide-react"
+import { Pause, Play, RotateCcw, AlertCircle, Eye, Camera, Upload, Video, AlertTriangle, CheckCircle, XCircle, ClipboardList } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 type Resultado = {
   defecto: string
   confianza: number
   tiene_defecto: boolean
+}
+
+type ResultadoColor = {
+  h: number
+  s: number
+  v: number
+  delta_h_deg: number
+  delta_s_pct: number
+  delta_v_pct: number
+  desviacion_pct: number
+  fuera_tolerancia: boolean
 }
 
 type Modo = "imagen" | "vivo" | "dashboard"
@@ -29,14 +40,22 @@ interface Defecto {
 export default function InspeccionActiva() {
   const [modo, setModo] = useState<Modo>("dashboard")
   const [isPaused, setIsPaused] = useState(false)
-  const [metrosInspeccionados, setMetrosInspeccionados] = useState(45.2)
+  const [metrosInspeccionados, setMetrosInspeccionados] = useState(0)
   const [defectos, setDefectos] = useState<Defecto[]>([])
+  const [velocidadMpm, setVelocidadMpm] = useState(5)
 
   const [limiteAceptable, setLimiteAceptable] = useState(40)
   const [zonaAdvertenciaPct, setZonaAdvertenciaPct] = useState(80)
+  const [anchoRolloIn, setAnchoRolloIn] = useState(45)
+  const [largoRolloYd, setLargoRolloYd] = useState(120)
+  const [framesCalibracion, setFramesCalibracion] = useState(5)
+  const [framesConfirmacion, setFramesConfirmacion] = useState(3)
 
   const totalPuntos = defectos.reduce((sum, d) => sum + d.puntos, 0)
-  const puntosASTM = metrosInspeccionados > 0 ? (totalPuntos / (metrosInspeccionados / 91.44) * 100).toFixed(1) : "0"
+  // ASTM D5430: (puntos × 36 × 100) / (ancho_in × largo_yd)
+  const puntosASTM = (anchoRolloIn > 0 && largoRolloYd > 0)
+    ? ((totalPuntos * 36 * 100) / (anchoRolloIn * largoRolloYd)).toFixed(1)
+    : "0"
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -47,12 +66,21 @@ export default function InspeccionActiva() {
   const anteriorTeniaDefectoRef = useRef(false)
 
   const [camaraActiva, setCamaraActiva] = useState(false)
+  const [pausado, setPausado] = useState(false)
   const [camaraFrontal, setCamaraFrontal] = useState(false)
   const [resultadoVivo, setResultadoVivo] = useState<Resultado | null>(null)
   const [procesando, setProcesando] = useState(false)
   const [contadorDefectos, setContadorDefectos] = useState(0)
   const [errorRed, setErrorRed] = useState(false)
   const [iniciando, setIniciando] = useState(false)
+
+  // AATCC 173: análisis de uniformidad de color
+  const [aatccActivo, setAatccActivo] = useState(false)
+  const [refColor, setRefColor] = useState<{ h: number; s: number; v: number } | null>(null)
+  const [resultadoColor, setResultadoColor] = useState<ResultadoColor | null>(null)
+  const [calibrando, setCalibrando] = useState(false)
+  const [contadorCalibracion, setContadorCalibracion] = useState(0)
+  const contadorColorFueraRef = useRef(0)
 
   const [imagen, setImagen] = useState<string | null>(null)
   const [resultadoImagen, setResultadoImagen] = useState<Resultado | null>(null)
@@ -65,6 +93,11 @@ export default function InspeccionActiva() {
       .then((d) => {
         setLimiteAceptable(d.umbral_pts ?? 40)
         setZonaAdvertenciaPct(d.zona_advertencia_pct ?? 80)
+        setAnchoRolloIn(d.ancho_rollo_in ?? 45)
+        setLargoRolloYd(d.largo_rollo_yd ?? 120)
+        setAatccActivo(d.aatcc_173_activo ?? false)
+        setFramesCalibracion(d.aatcc_frames_calibracion ?? 5)
+        setFramesConfirmacion(d.aatcc_frames_confirmacion ?? 3)
       })
       .catch(() => {})
   }, [])
@@ -76,6 +109,14 @@ export default function InspeccionActiva() {
     }, 500)
     return () => clearInterval(interval)
   }, [isPaused, modo])
+
+  useEffect(() => {
+    if (!camaraActiva || modo !== "vivo") return
+    const interval = setInterval(() => {
+      setMetrosInspeccionados((m) => m + velocidadMpm / 120)
+    }, 500)
+    return () => clearInterval(interval)
+  }, [camaraActiva, modo, velocidadMpm])
 
   const getEstadoPuntaje = () => {
     const pts = parseFloat(puntosASTM)
@@ -122,6 +163,8 @@ export default function InspeccionActiva() {
     setProcesando(true)
     const formData = new FormData()
     formData.append("file", new File([blob], "frame.jpg", { type: "image/jpeg" }))
+
+    // Análisis YOLO (siempre)
     try {
       const res = await fetch("http://localhost:8000/analizar", {
         method: "POST",
@@ -148,10 +191,65 @@ export default function InspeccionActiva() {
       anteriorTeniaDefectoRef.current = data.tiene_defecto
     } catch {
       setErrorRed(true)
-    } finally {
-      setProcesando(false)
     }
-  }, [reproducirBeep])
+
+    // Análisis AATCC 173 (si está activo) — usa valores cargados al inicio, no fetch por frame
+    if (aatccActivo) {
+      if (refColor && !calibrando) {
+        // Ya hay referencia: comparar
+        try {
+          const formColor = new FormData()
+          formColor.append("file", new File([blob], "frame.jpg", { type: "image/jpeg" }))
+          formColor.append("ref_h", refColor.h.toString())
+          formColor.append("ref_s", refColor.s.toString())
+          formColor.append("ref_v", refColor.v.toString())
+
+          const resColor = await fetch("http://localhost:8000/analizar-color", {
+            method: "POST",
+            body: formColor,
+          })
+          const dataColor: ResultadoColor = await resColor.json()
+          setResultadoColor(dataColor)
+
+          if (dataColor.fuera_tolerancia) {
+            contadorColorFueraRef.current += 1
+            if (contadorColorFueraRef.current >= framesConfirmacion) {
+              reproducirBeep()
+            }
+          } else {
+            contadorColorFueraRef.current = 0
+          }
+        } catch {
+          // Error en análisis de color, ignorar
+        }
+      } else if (calibrando) {
+        // Modo calibración
+        try {
+          const formCal = new FormData()
+          formCal.append("file", new File([blob], "frame.jpg", { type: "image/jpeg" }))
+
+          const resCal = await fetch("http://localhost:8000/analizar-color", {
+            method: "POST",
+            body: formCal,
+          })
+          const dataCal: ResultadoColor = await resCal.json()
+
+          setRefColor({ h: dataCal.h, s: dataCal.s, v: dataCal.v })
+          const nuevoContador = contadorCalibracion + 1
+          setContadorCalibracion(nuevoContador)
+
+          if (nuevoContador >= framesCalibracion) {
+            setCalibrando(false)
+            setContadorCalibracion(0)
+          }
+        } catch {
+          // Error en calibración
+        }
+      }
+    }
+
+    setProcesando(false)
+  }, [reproducirBeep, aatccActivo, refColor, calibrando, contadorCalibracion, framesCalibracion, framesConfirmacion])
 
   const iniciarCamara = useCallback(async (frontal: boolean) => {
     if (streamRef.current) {
@@ -168,13 +266,21 @@ export default function InspeccionActiva() {
       }
       setCamaraActiva(true)
       setResultadoVivo(null)
+      setResultadoColor(null)
       anteriorTeniaDefectoRef.current = false
+
+      if (aatccActivo) {
+        setRefColor(null)
+        setContadorCalibracion(0)
+        contadorColorFueraRef.current = 0
+        setCalibrando(true)
+      }
     } catch {
       alert("No se pudo acceder a la cámara.")
     } finally {
       setIniciando(false)
     }
-  }, [])
+  }, [aatccActivo])
 
   const detenerCamara = useCallback(() => {
     loopActivoRef.current = false
@@ -187,6 +293,7 @@ export default function InspeccionActiva() {
       streamRef.current = null
     }
     setCamaraActiva(false)
+    setPausado(false)
     setResultadoVivo(null)
     setProcesando(false)
     setErrorRed(false)
@@ -195,7 +302,7 @@ export default function InspeccionActiva() {
   }, [])
 
   useEffect(() => {
-    if (!camaraActiva || modo !== "vivo") {
+    if (!camaraActiva || modo !== "vivo" || pausado) {
       loopActivoRef.current = false
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current)
@@ -222,7 +329,7 @@ export default function InspeccionActiva() {
         timeoutRef.current = null
       }
     }
-  }, [camaraActiva, modo, capturarYAnalizar])
+  }, [camaraActiva, pausado, modo, capturarYAnalizar])
 
   useEffect(() => () => detenerCamara(), [detenerCamara])
 
@@ -325,20 +432,30 @@ export default function InspeccionActiva() {
           />
         )}
 
-        {modo === "vivo" && (
+{modo === "vivo" && (
           <ModoVideoVivo
             videoRef={videoRef}
             canvasRef={canvasRef}
             camaraActiva={camaraActiva}
+            pausado={pausado}
+            setPausado={setPausado}
             camaraFrontal={camaraFrontal}
             resultadoVivo={resultadoVivo}
             procesando={procesando}
             errorRed={errorRed}
             iniciando={iniciando}
             contadorDefectos={contadorDefectos}
+            metrosInspeccionados={metrosInspeccionados}
+            velocidadMpm={velocidadMpm}
+            setVelocidadMpm={setVelocidadMpm}
             iniciarCamara={iniciarCamara}
             detenerCamara={detenerCamara}
             setCamaraFrontal={setCamaraFrontal}
+            aatccActivo={aatccActivo}
+            refColor={refColor}
+            resultadoColor={resultadoColor}
+            calibrando={calibrando}
+            contadorCalibracion={contadorCalibracion}
           />
         )}
 
@@ -380,7 +497,91 @@ function DashboardView({
   setMetrosInspeccionados: (v: number) => void
   setDefectos: (v: Defecto[]) => void
 }) {
+  const [mostrarVeredicto, setMostrarVeredicto] = useState(false)
+  const aprobado = parseFloat(puntosASTM) <= limiteAceptable
+
+  const finalizar = () => {
+    setIsPaused(true)
+    setMostrarVeredicto(true)
+  }
+
+  const nuevaInspeccion = () => {
+    setMetrosInspeccionados(0)
+    setDefectos([])
+    setIsPaused(false)
+    setMostrarVeredicto(false)
+  }
+
   return (
+    <>
+      {/* Modal de veredicto */}
+      {mostrarVeredicto && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-obsidiana/80 backdrop-blur-sm">
+          <div className={cn(
+            "w-full max-w-md rounded-3xl p-8 text-center border-4 space-y-6",
+            aprobado ? "bg-arena border-nopal" : "bg-arena border-red-500"
+          )}>
+            <div className={cn(
+              "w-24 h-24 rounded-full mx-auto flex items-center justify-center",
+              aprobado ? "bg-nopal" : "bg-red-500"
+            )}>
+              {aprobado
+                ? <CheckCircle className="w-14 h-14 text-arena" />
+                : <XCircle className="w-14 h-14 text-white" />
+              }
+            </div>
+
+            <div>
+              <p className={cn("font-serif text-5xl font-bold", aprobado ? "text-nopal" : "text-red-600")}>
+                {aprobado ? "APROBADO" : "RECHAZADO"}
+              </p>
+              <p className="text-humo mt-2 text-sm">Inspección finalizada — {new Date().toLocaleString("es-MX")}</p>
+            </div>
+
+            <div className="bg-lino rounded-2xl p-4 space-y-3 text-left border border-tierra/20">
+              <div className="flex justify-between items-center">
+                <span className="text-humo text-sm">Puntaje ASTM D5430</span>
+                <span className={cn("font-mono font-bold text-lg", aprobado ? "text-nopal" : "text-red-600")}>
+                  {puntosASTM} pts/100yd²
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-humo text-sm">Límite aceptable</span>
+                <span className="font-mono font-bold text-obsidiana">{limiteAceptable} pts/100yd²</span>
+              </div>
+              <div className="h-px bg-tierra/20" />
+              <div className="flex justify-between items-center">
+                <span className="text-humo text-sm">Defectos detectados</span>
+                <span className="font-mono font-bold text-obsidiana">{defectos.length}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-humo text-sm">Puntos acumulados</span>
+                <span className="font-mono font-bold text-obsidiana">{totalPuntos} pts</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-humo text-sm">Metros inspeccionados</span>
+                <span className="font-mono font-bold text-obsidiana">{metrosInspeccionados.toFixed(1)} m</span>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={nuevaInspeccion}
+                className="flex-1 py-3 bg-tierra text-arena rounded-xl font-semibold hover:bg-tierra/90 transition-all"
+              >
+                Nueva inspección
+              </button>
+              <button
+                onClick={() => setMostrarVeredicto(false)}
+                className="flex-1 py-3 bg-arena text-tierra border-2 border-tierra rounded-xl font-semibold hover:bg-lino transition-all"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div className="lg:col-span-2 space-y-4">
         <div className="relative bg-obsidiana rounded-2xl overflow-hidden border-2 border-tierra aspect-video">
@@ -442,7 +643,7 @@ function DashboardView({
           >
             {isPaused ? <><Play className="w-6 h-6" /> Reanudar</> : <><Pause className="w-6 h-6" /> Pausar</>}
           </button>
-          <button 
+          <button
             onClick={() => { setMetrosInspeccionados(0); setDefectos([]); }}
             className="btn-tactile px-6 rounded-xl bg-lino text-tierra border-2 border-tierra hover:bg-arena transition-all flex items-center gap-2"
           >
@@ -450,6 +651,13 @@ function DashboardView({
             <span className="hidden md:inline">Reiniciar</span>
           </button>
         </div>
+        <button
+          onClick={finalizar}
+          className="w-full btn-tactile rounded-xl bg-tierra text-arena border-2 border-tierra hover:bg-tierra/90 transition-all flex items-center justify-center gap-2"
+        >
+          <ClipboardList className="w-5 h-5" />
+          Finalizar inspección
+        </button>
       </div>
 
       <div className="space-y-4">
@@ -516,6 +724,7 @@ function DashboardView({
         </div>
       </div>
     </div>
+  </>
   )
 }
 
@@ -592,21 +801,33 @@ function ModoImagen({
 }
 
 function ModoVideoVivo({
-  videoRef, canvasRef, camaraActiva, camaraFrontal, resultadoVivo, procesando,
-  errorRed, iniciando, contadorDefectos, iniciarCamara, detenerCamara, setCamaraFrontal
+  videoRef, canvasRef, camaraActiva, pausado, setPausado, camaraFrontal, resultadoVivo, procesando,
+  errorRed, iniciando, contadorDefectos, metrosInspeccionados, velocidadMpm,
+  setVelocidadMpm, iniciarCamara, detenerCamara, setCamaraFrontal,
+  aatccActivo, refColor, resultadoColor, calibrando, contadorCalibracion
 }: {
   videoRef: React.RefObject<HTMLVideoElement | null>
   canvasRef: React.RefObject<HTMLCanvasElement | null>
   camaraActiva: boolean
+  pausado: boolean
+  setPausado: (v: boolean) => void
   camaraFrontal: boolean
   resultadoVivo: Resultado | null
   procesando: boolean
   errorRed: boolean
   iniciando: boolean
   contadorDefectos: number
+  metrosInspeccionados: number
+  velocidadMpm: number
+  setVelocidadMpm: (v: number) => void
   iniciarCamara: (frontal: boolean) => void
   detenerCamara: () => void
   setCamaraFrontal: (v: boolean) => void
+  aatccActivo: boolean
+  refColor: { h: number; s: number; v: number } | null
+  resultadoColor: ResultadoColor | null
+  calibrando: boolean
+  contadorCalibracion: number
 }) {
   const cambiarCamara = async () => {
     const nuevaFrontal = !camaraFrontal
@@ -616,18 +837,87 @@ function ModoVideoVivo({
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
-      <div className="flex gap-3 flex-wrap">
-        <div className="flex-1 bg-lino border-2 border-tierra rounded-xl px-4 py-2 text-center">
-          <span className="text-humo text-sm">Defectos: </span>
-          <span className="font-bold text-tierra text-lg">{contadorDefectos}</span>
+      {/* Barra AATCC 173 */}
+      {aatccActivo && (
+        <div className="bg-lino border-2 border-tierra rounded-xl p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-tierra">AATCC 173 — Color</span>
+            {calibrando ? (
+              <span className="text-xs bg-maiz text-obsidiana px-2 py-0.5 rounded animate-pulse">
+                Calibrando... {contadorCalibracion}/5
+              </span>
+            ) : refColor ? (
+              <span className="text-xs bg-nopal text-arena px-2 py-0.5 rounded">Calibrado</span>
+            ) : (
+              <span className="text-xs bg-humo/20 text-humo px-2 py-0.5 rounded">Sin calibrar</span>
+            )}
+          </div>
+          {resultadoColor && (
+            <>
+              <div className="h-3 bg-arena rounded-full overflow-hidden border border-tierra/30">
+                <div
+                  className={cn("h-full transition-all duration-300 rounded-full",
+                    resultadoColor.fuera_tolerancia ? "bg-red-500" : "bg-nopal")}
+                  style={{ width: `${resultadoColor.desviacion_pct}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-xs text-humo">
+                <span>Desviación: {resultadoColor.desviacion_pct}%</span>
+                <span>ΔH:{resultadoColor.delta_h_deg.toFixed(0)}° ΔS:{resultadoColor.delta_s_pct.toFixed(0)}% ΔV:{resultadoColor.delta_v_pct.toFixed(0)}%</span>
+              </div>
+            </>
+          )}
         </div>
+      )}
+      {/* Métricas en vivo */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-lino border-2 border-tierra rounded-xl px-4 py-3 text-center">
+          <p className="text-humo text-xs mb-1">Metros inspeccionados</p>
+          <p className="font-bold text-tierra text-2xl font-mono">
+            {metrosInspeccionados.toFixed(1)}
+            <span className="text-sm font-normal ml-1">m</span>
+          </p>
+        </div>
+        <div className="bg-lino border-2 border-tierra rounded-xl px-4 py-3 text-center">
+          <p className="text-humo text-xs mb-1">Defectos detectados</p>
+          <p className="font-bold text-tierra text-2xl font-mono">{contadorDefectos}</p>
+        </div>
+      </div>
+
+      {/* Control de velocidad de línea */}
+      <div className="bg-lino border-2 border-tierra/50 rounded-xl px-4 py-3 flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-obsidiana">Velocidad de línea</p>
+          <p className="text-xs text-humo">metros por minuto que avanza la tela</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setVelocidadMpm(Math.max(1, velocidadMpm - 1))}
+            className="w-8 h-8 rounded-lg bg-arena border-2 border-tierra text-tierra font-bold hover:bg-lino transition-all"
+          >
+            −
+          </button>
+          <span className="font-mono font-bold text-tierra text-lg w-16 text-center">
+            {velocidadMpm} m/min
+          </span>
+          <button
+            onClick={() => setVelocidadMpm(Math.min(60, velocidadMpm + 1))}
+            className="w-8 h-8 rounded-lg bg-arena border-2 border-tierra text-tierra font-bold hover:bg-lino transition-all"
+          >
+            +
+          </button>
+        </div>
+      </div>
+
+      {/* Alertas de estado */}
+      <div className="flex gap-3 flex-wrap">
         {errorRed && (
-          <div className="bg-yellow-50 border-2 border-yellow-400 rounded-xl px-4 py-2 text-sm text-yellow-700">
+          <div className="flex-1 bg-yellow-50 border-2 border-yellow-400 rounded-xl px-4 py-2 text-sm text-yellow-700">
             Sin conexión con backend
           </div>
         )}
         {procesando && !errorRed && (
-          <div className="bg-maiz/20 border-2 border-maiz rounded-xl px-4 py-2 text-sm text-tierra animate-pulse">
+          <div className="flex-1 bg-maiz/20 border-2 border-maiz rounded-xl px-4 py-2 text-sm text-tierra animate-pulse">
             Analizando...
           </div>
         )}
@@ -690,17 +980,24 @@ function ModoVideoVivo({
         </button>
       ) : (
         <div className="grid grid-cols-3 gap-3">
-          <button className="py-3 bg-maiz text-obsidiana rounded-xl font-medium hover:bg-maiz/90 transition-all active:scale-95">
-            🔄 {camaraFrontal ? "Frontal" : "Trasera"}
+          <button
+            onClick={() => setPausado(!pausado)}
+            className={`py-3 rounded-xl font-medium transition-all active:scale-95 border-2 ${
+              pausado
+                ? "bg-nopal text-arena border-nopal hover:bg-nopal/90"
+                : "bg-maiz text-obsidiana border-maiz hover:bg-maiz/90"
+            }`}
+          >
+            {pausado ? "▶ Reanudar" : "⏸ Pausar"}
           </button>
           <button
             onClick={cambiarCamara}
             className="py-3 bg-lino text-tierra border-2 border-tierra rounded-xl font-medium hover:bg-arena transition-all active:scale-95"
           >
-            🔄 Cambiar
+            🔄 {camaraFrontal ? "Trasera" : "Frontal"}
           </button>
           <button
-            onClick={() => { detenerCamara(); }}
+            onClick={detenerCamara}
             className="py-3 bg-red-100 text-red-600 rounded-xl font-medium hover:bg-red-200 transition-all active:scale-95"
           >
             Detener
