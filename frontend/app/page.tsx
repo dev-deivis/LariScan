@@ -29,14 +29,20 @@ interface Defecto {
 export default function InspeccionActiva() {
   const [modo, setModo] = useState<Modo>("dashboard")
   const [isPaused, setIsPaused] = useState(false)
-  const [metrosInspeccionados, setMetrosInspeccionados] = useState(45.2)
+  const [metrosInspeccionados, setMetrosInspeccionados] = useState(0)
   const [defectos, setDefectos] = useState<Defecto[]>([])
+  const [velocidadMpm, setVelocidadMpm] = useState(5)
 
   const [limiteAceptable, setLimiteAceptable] = useState(40)
   const [zonaAdvertenciaPct, setZonaAdvertenciaPct] = useState(80)
+  const [anchoRolloIn, setAnchoRolloIn] = useState(45)
+  const [largoRolloYd, setLargoRolloYd] = useState(120)
 
   const totalPuntos = defectos.reduce((sum, d) => sum + d.puntos, 0)
-  const puntosASTM = metrosInspeccionados > 0 ? (totalPuntos / (metrosInspeccionados / 91.44) * 100).toFixed(1) : "0"
+  // ASTM D5430: (puntos × 36 × 100) / (ancho_in × largo_yd)
+  const puntosASTM = (anchoRolloIn > 0 && largoRolloYd > 0)
+    ? ((totalPuntos * 36 * 100) / (anchoRolloIn * largoRolloYd)).toFixed(1)
+    : "0"
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -65,6 +71,8 @@ export default function InspeccionActiva() {
       .then((d) => {
         setLimiteAceptable(d.umbral_pts ?? 40)
         setZonaAdvertenciaPct(d.zona_advertencia_pct ?? 80)
+        setAnchoRolloIn(d.ancho_rollo_in ?? 45)
+        setLargoRolloYd(d.largo_rollo_yd ?? 120)
       })
       .catch(() => {})
   }, [])
@@ -76,6 +84,14 @@ export default function InspeccionActiva() {
     }, 500)
     return () => clearInterval(interval)
   }, [isPaused, modo])
+
+  useEffect(() => {
+    if (!camaraActiva || modo !== "vivo") return
+    const interval = setInterval(() => {
+      setMetrosInspeccionados((m) => m + velocidadMpm / 120)
+    }, 500)
+    return () => clearInterval(interval)
+  }, [camaraActiva, modo, velocidadMpm])
 
   const getEstadoPuntaje = () => {
     const pts = parseFloat(puntosASTM)
@@ -336,6 +352,9 @@ export default function InspeccionActiva() {
             errorRed={errorRed}
             iniciando={iniciando}
             contadorDefectos={contadorDefectos}
+            metrosInspeccionados={metrosInspeccionados}
+            velocidadMpm={velocidadMpm}
+            setVelocidadMpm={setVelocidadMpm}
             iniciarCamara={iniciarCamara}
             detenerCamara={detenerCamara}
             setCamaraFrontal={setCamaraFrontal}
@@ -593,7 +612,8 @@ function ModoImagen({
 
 function ModoVideoVivo({
   videoRef, canvasRef, camaraActiva, camaraFrontal, resultadoVivo, procesando,
-  errorRed, iniciando, contadorDefectos, iniciarCamara, detenerCamara, setCamaraFrontal
+  errorRed, iniciando, contadorDefectos, metrosInspeccionados, velocidadMpm,
+  setVelocidadMpm, iniciarCamara, detenerCamara, setCamaraFrontal
 }: {
   videoRef: React.RefObject<HTMLVideoElement | null>
   canvasRef: React.RefObject<HTMLCanvasElement | null>
@@ -604,6 +624,9 @@ function ModoVideoVivo({
   errorRed: boolean
   iniciando: boolean
   contadorDefectos: number
+  metrosInspeccionados: number
+  velocidadMpm: number
+  setVelocidadMpm: (v: number) => void
   iniciarCamara: (frontal: boolean) => void
   detenerCamara: () => void
   setCamaraFrontal: (v: boolean) => void
@@ -616,18 +639,55 @@ function ModoVideoVivo({
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
-      <div className="flex gap-3 flex-wrap">
-        <div className="flex-1 bg-lino border-2 border-tierra rounded-xl px-4 py-2 text-center">
-          <span className="text-humo text-sm">Defectos: </span>
-          <span className="font-bold text-tierra text-lg">{contadorDefectos}</span>
+      {/* Métricas en vivo */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-lino border-2 border-tierra rounded-xl px-4 py-3 text-center">
+          <p className="text-humo text-xs mb-1">Metros inspeccionados</p>
+          <p className="font-bold text-tierra text-2xl font-mono">
+            {metrosInspeccionados.toFixed(1)}
+            <span className="text-sm font-normal ml-1">m</span>
+          </p>
         </div>
+        <div className="bg-lino border-2 border-tierra rounded-xl px-4 py-3 text-center">
+          <p className="text-humo text-xs mb-1">Defectos detectados</p>
+          <p className="font-bold text-tierra text-2xl font-mono">{contadorDefectos}</p>
+        </div>
+      </div>
+
+      {/* Control de velocidad de línea */}
+      <div className="bg-lino border-2 border-tierra/50 rounded-xl px-4 py-3 flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-obsidiana">Velocidad de línea</p>
+          <p className="text-xs text-humo">metros por minuto que avanza la tela</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setVelocidadMpm(Math.max(1, velocidadMpm - 1))}
+            className="w-8 h-8 rounded-lg bg-arena border-2 border-tierra text-tierra font-bold hover:bg-lino transition-all"
+          >
+            −
+          </button>
+          <span className="font-mono font-bold text-tierra text-lg w-16 text-center">
+            {velocidadMpm} m/min
+          </span>
+          <button
+            onClick={() => setVelocidadMpm(Math.min(60, velocidadMpm + 1))}
+            className="w-8 h-8 rounded-lg bg-arena border-2 border-tierra text-tierra font-bold hover:bg-lino transition-all"
+          >
+            +
+          </button>
+        </div>
+      </div>
+
+      {/* Alertas de estado */}
+      <div className="flex gap-3 flex-wrap">
         {errorRed && (
-          <div className="bg-yellow-50 border-2 border-yellow-400 rounded-xl px-4 py-2 text-sm text-yellow-700">
+          <div className="flex-1 bg-yellow-50 border-2 border-yellow-400 rounded-xl px-4 py-2 text-sm text-yellow-700">
             Sin conexión con backend
           </div>
         )}
         {procesando && !errorRed && (
-          <div className="bg-maiz/20 border-2 border-maiz rounded-xl px-4 py-2 text-sm text-tierra animate-pulse">
+          <div className="flex-1 bg-maiz/20 border-2 border-maiz rounded-xl px-4 py-2 text-sm text-tierra animate-pulse">
             Analizando...
           </div>
         )}
@@ -689,21 +749,18 @@ function ModoVideoVivo({
           {iniciando ? "Iniciando..." : "Iniciar cámara"}
         </button>
       ) : (
-        <div className="grid grid-cols-3 gap-3">
-          <button className="py-3 bg-maiz text-obsidiana rounded-xl font-medium hover:bg-maiz/90 transition-all active:scale-95">
-            🔄 {camaraFrontal ? "Frontal" : "Trasera"}
-          </button>
+        <div className="grid grid-cols-2 gap-3">
           <button
             onClick={cambiarCamara}
             className="py-3 bg-lino text-tierra border-2 border-tierra rounded-xl font-medium hover:bg-arena transition-all active:scale-95"
           >
-            🔄 Cambiar
+            🔄 Cambiar a {camaraFrontal ? "trasera" : "frontal"}
           </button>
           <button
-            onClick={() => { detenerCamara(); }}
+            onClick={detenerCamara}
             className="py-3 bg-red-100 text-red-600 rounded-xl font-medium hover:bg-red-200 transition-all active:scale-95"
           >
-            Detener
+            Detener cámara
           </button>
         </div>
       )}
