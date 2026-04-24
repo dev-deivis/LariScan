@@ -417,6 +417,8 @@ export default function InspeccionActiva() {
             getEstadoPuntaje={getEstadoPuntaje}
             setMetrosInspeccionados={setMetrosInspeccionados}
             setDefectos={setDefectos}
+            anchoRolloIn={anchoRolloIn}
+            largoRolloYd={largoRolloYd}
           />
         )}
 
@@ -484,7 +486,8 @@ export default function InspeccionActiva() {
 
 function DashboardView({
   isPaused, setIsPaused, metrosInspeccionados, defectos, totalPuntos,
-  puntosASTM, limiteAceptable, getEstadoPuntaje, setMetrosInspeccionados, setDefectos
+  puntosASTM, limiteAceptable, getEstadoPuntaje, setMetrosInspeccionados, setDefectos,
+  anchoRolloIn, largoRolloYd,
 }: {
   isPaused: boolean
   setIsPaused: (v: boolean) => void
@@ -496,13 +499,59 @@ function DashboardView({
   getEstadoPuntaje: () => string
   setMetrosInspeccionados: (v: number) => void
   setDefectos: (v: Defecto[]) => void
+  anchoRolloIn: number
+  largoRolloYd: number
 }) {
   const [mostrarVeredicto, setMostrarVeredicto] = useState(false)
+  const [guardando, setGuardando] = useState(false)
   const aprobado = parseFloat(puntosASTM) <= limiteAceptable
 
-  const finalizar = () => {
+  const finalizar = async () => {
     setIsPaused(true)
-    setMostrarVeredicto(true)
+    setGuardando(true)
+    const ahora = new Date().toISOString()
+    const hoy = ahora.split("T")[0]
+    const body = {
+      id_rollo: "R-2024-0847",
+      numero_lote: "L-001",
+      proveedor: "Textiles del Valle",
+      tipo_tela: "Algodón 100%",
+      ancho_pulgadas: anchoRolloIn,
+      largo_yardas: largoRolloYd,
+      fecha_recepcion: hoy,
+      fecha_inspeccion: hoy,
+      inspector_id: "USR-001",
+      inspector_nombre: "Inspector",
+      inspector_turno: "Matutino",
+      umbral_configurado: limiteAceptable,
+      total_defectos_detectados: defectos.length,
+      puntos_totales_astm: totalPuntos,
+      score_100yd2: parseFloat(puntosASTM),
+      veredicto_final: aprobado ? "APROBADO" : "RECHAZADO",
+      defectos: defectos.map((d, i) => ({
+        tipo: d.tipo,
+        tamano_in: 1.5,
+        puntos_asignados: d.puntos,
+        posicion_rollo_metros: parseFloat(((i + 1) * (metrosInspeccionados / Math.max(defectos.length, 1))).toFixed(2)),
+        confianza_deteccion: 75.0,
+        validado_por_inspector: false,
+        accion_tomada: "registrado",
+      })),
+    }
+    try {
+      const res = await fetch("http://localhost:8000/reportes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      localStorage.setItem("lariscan_ultimo_reporte_id", data.id)
+    } catch {
+      // Error al guardar, mostrar veredicto de todos modos
+    } finally {
+      setGuardando(false)
+      setMostrarVeredicto(true)
+    }
   }
 
   const nuevaInspeccion = () => {
@@ -564,19 +613,27 @@ function DashboardView({
               </div>
             </div>
 
-            <div className="flex gap-3">
-              <button
-                onClick={nuevaInspeccion}
-                className="flex-1 py-3 bg-tierra text-arena rounded-xl font-semibold hover:bg-tierra/90 transition-all"
+            <div className="space-y-3">
+              <a
+                href="/resumen"
+                className="block w-full py-3 bg-nopal text-arena rounded-xl font-semibold hover:bg-nopal/90 transition-all text-center"
               >
-                Nueva inspección
-              </button>
-              <button
-                onClick={() => setMostrarVeredicto(false)}
-                className="flex-1 py-3 bg-arena text-tierra border-2 border-tierra rounded-xl font-semibold hover:bg-lino transition-all"
-              >
-                Cerrar
-              </button>
+                Ver resumen completo
+              </a>
+              <div className="flex gap-3">
+                <button
+                  onClick={nuevaInspeccion}
+                  className="flex-1 py-3 bg-tierra text-arena rounded-xl font-semibold hover:bg-tierra/90 transition-all"
+                >
+                  Nueva inspección
+                </button>
+                <button
+                  onClick={() => setMostrarVeredicto(false)}
+                  className="flex-1 py-3 bg-arena text-tierra border-2 border-tierra rounded-xl font-semibold hover:bg-lino transition-all"
+                >
+                  Cerrar
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -653,10 +710,11 @@ function DashboardView({
         </div>
         <button
           onClick={finalizar}
-          className="w-full btn-tactile rounded-xl bg-tierra text-arena border-2 border-tierra hover:bg-tierra/90 transition-all flex items-center justify-center gap-2"
+          disabled={guardando}
+          className="w-full btn-tactile rounded-xl bg-tierra text-arena border-2 border-tierra hover:bg-tierra/90 transition-all flex items-center justify-center gap-2 disabled:opacity-70"
         >
           <ClipboardList className="w-5 h-5" />
-          Finalizar inspección
+          {guardando ? "Guardando..." : "Finalizar inspección"}
         </button>
       </div>
 

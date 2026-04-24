@@ -1,19 +1,19 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { AppShell } from "@/components/lariscan/app-shell"
 import { GrecaSeparator } from "@/components/lariscan/greca-separator"
-import { 
-  Check, 
-  X, 
-  Palette, 
-  ZoomIn, 
-  ZoomOut, 
+import {
+  Check,
+  X,
+  Palette,
+  ZoomIn,
+  ZoomOut,
   RotateCw,
   AlertCircle,
   ChevronLeft,
   ChevronRight,
-  Sparkles
+  Sparkles,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -26,12 +26,6 @@ interface DefectoPendiente {
   puntosEstimados: number
   timestamp: string
 }
-
-const defectosPendientes: DefectoPendiente[] = [
-  { id: "V001", rolloId: "R-2024-0847", tipoSugerido: "Hilo roto", confianza: 72, tamañoEstimado: 'hasta 3"', puntosEstimados: 1, timestamp: "10:45:23" },
-  { id: "V002", rolloId: "R-2024-0847", tipoSugerido: "Mancha", confianza: 58, tamañoEstimado: '3" a 6"', puntosEstimados: 2, timestamp: "10:52:11" },
-  { id: "V003", rolloId: "R-2024-0848", tipoSugerido: "Costura abierta", confianza: 65, tamañoEstimado: 'hasta 3"', puntosEstimados: 1, timestamp: "11:03:45" },
-]
 
 const tiposDefecto = [
   "Hilo roto",
@@ -49,16 +43,53 @@ export default function ValidacionDefecto() {
   const [zoom, setZoom] = useState(1)
   const [tipoCorregido, setTipoCorregido] = useState<string | null>(null)
   const [validados, setValidados] = useState<string[]>([])
+  const [defectosPendientes, setDefectosPendientes] = useState<DefectoPendiente[]>([])
+  const [cargando, setCargando] = useState(true)
+
+  useEffect(() => {
+    const id = localStorage.getItem("lariscan_ultimo_reporte_id")
+    if (!id) {
+      setCargando(false)
+      return
+    }
+    fetch(`http://localhost:8000/reportes/${id}`)
+      .then((r) => r.json())
+      .then((data) => {
+        const idRollo = data.identificacion?.id_rollo ?? id
+        const pendientes: DefectoPendiente[] = (data.defectos ?? [])
+          .filter((d: { confianza_deteccion: number; validado_por_inspector: boolean }) =>
+            !d.validado_por_inspector && d.confianza_deteccion < 80
+          )
+          .map((d: {
+            id_defecto: string
+            tipo: string
+            confianza_deteccion: number
+            tamano_in: number
+            puntos_asignados: number
+            posicion_rollo_metros: number
+          }) => ({
+            id: d.id_defecto,
+            rolloId: idRollo,
+            tipoSugerido: d.tipo,
+            confianza: Math.round(d.confianza_deteccion),
+            tamañoEstimado: `~${d.tamano_in.toFixed(1)}"`,
+            puntosEstimados: d.puntos_asignados,
+            timestamp: `@${d.posicion_rollo_metros.toFixed(1)}m`,
+          }))
+        setDefectosPendientes(pendientes)
+      })
+      .catch(() => {})
+      .finally(() => setCargando(false))
+  }, [])
 
   const defecto = defectosPendientes[defectoActual]
   const pendientes = defectosPendientes.filter((d) => !validados.includes(d.id))
 
-  const handleValidar = (accion: "confirmar" | "rechazar" | "diseño") => {
+  const handleValidar = () => {
+    if (!defecto) return
     setValidados([...validados, defecto.id])
     setTipoCorregido(null)
     setZoom(1)
-    
-    // Avanzar al siguiente si hay más
     if (defectoActual < defectosPendientes.length - 1) {
       setDefectoActual(defectoActual + 1)
     }
@@ -86,6 +117,19 @@ export default function ValidacionDefecto() {
     return "bg-tierra/20"
   }
 
+  if (cargando) {
+    return (
+      <AppShell>
+        <div className="max-w-4xl mx-auto flex items-center justify-center py-24">
+          <div className="text-center space-y-3">
+            <div className="w-10 h-10 border-4 border-tierra border-t-transparent rounded-full animate-spin mx-auto" />
+            <p className="text-humo">Cargando defectos pendientes...</p>
+          </div>
+        </div>
+      </AppShell>
+    )
+  }
+
   if (pendientes.length === 0) {
     return (
       <AppShell>
@@ -111,7 +155,7 @@ export default function ValidacionDefecto() {
               ¡Todo validado!
             </h2>
             <p className="text-humo max-w-md mx-auto">
-              No hay defectos pendientes de validación. El sistema te notificará 
+              No hay defectos pendientes de validación. El sistema te notificará
               cuando detecte algo con baja confianza.
             </p>
           </div>
@@ -133,7 +177,7 @@ export default function ValidacionDefecto() {
               Revisa y confirma los defectos detectados con baja confianza
             </p>
           </div>
-          
+
           <div className="flex items-center gap-2 bg-maiz/20 px-4 py-2 rounded-xl">
             <AlertCircle className="w-5 h-5 text-maiz" />
             <span className="font-mono font-bold text-obsidiana">{pendientes.length}</span>
@@ -152,14 +196,14 @@ export default function ValidacionDefecto() {
           >
             <ChevronLeft className="w-6 h-6" />
           </button>
-          
+
           <div className="text-center">
             <p className="text-humo text-sm">Defecto</p>
             <p className="font-mono text-xl font-bold text-obsidiana">
               {defectoActual + 1} de {defectosPendientes.length}
             </p>
           </div>
-          
+
           <button
             onClick={() => navegarDefecto("next")}
             disabled={defectoActual === defectosPendientes.length - 1}
@@ -174,14 +218,14 @@ export default function ValidacionDefecto() {
           <div className="lg:col-span-2 space-y-4">
             <div className="relative bg-obsidiana rounded-2xl overflow-hidden border-2 border-tierra aspect-square md:aspect-video">
               {/* Imagen del defecto con zoom */}
-              <div 
+              <div
                 className="absolute inset-0 flex items-center justify-center transition-transform duration-200"
                 style={{ transform: `scale(${zoom})` }}
               >
                 {/* Simulación de imagen con patrón de tejido y defecto */}
                 <div className="w-full h-full relative">
                   {/* Fondo de tejido */}
-                  <div 
+                  <div
                     className="absolute inset-0"
                     style={{
                       backgroundImage: `
@@ -202,7 +246,7 @@ export default function ValidacionDefecto() {
                       `,
                     }}
                   />
-                  
+
                   {/* Marcador del defecto */}
                   <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
                     <div className="relative">
@@ -210,7 +254,7 @@ export default function ValidacionDefecto() {
                       <div className="w-32 h-32 rounded-full border-4 border-arcilla animate-pulse flex items-center justify-center">
                         <div className="w-24 h-24 rounded-full border-2 border-dashed border-arcilla/60" />
                       </div>
-                      
+
                       {/* Línea de defecto simulada */}
                       <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-16 h-0.5 bg-tierra rotate-12" />
                     </div>
@@ -331,23 +375,23 @@ export default function ValidacionDefecto() {
             {/* Botones de acción */}
             <div className="space-y-3">
               <button
-                onClick={() => handleValidar("confirmar")}
+                onClick={handleValidar}
                 className="w-full btn-tactile bg-nopal text-arena rounded-xl flex items-center justify-center gap-3 hover:bg-nopal/90 transition-all"
               >
                 <Check className="w-6 h-6" strokeWidth={3} />
                 Confirmar defecto
               </button>
-              
+
               <button
-                onClick={() => handleValidar("rechazar")}
+                onClick={handleValidar}
                 className="w-full btn-tactile bg-tierra text-arena rounded-xl flex items-center justify-center gap-3 hover:bg-tierra/90 transition-all"
               >
                 <X className="w-6 h-6" strokeWidth={3} />
                 No es defecto
               </button>
-              
+
               <button
-                onClick={() => handleValidar("diseño")}
+                onClick={handleValidar}
                 className="w-full btn-tactile bg-lino text-tierra border-2 border-tierra rounded-xl flex items-center justify-center gap-3 hover:bg-arena transition-all"
               >
                 <Palette className="w-6 h-6" />

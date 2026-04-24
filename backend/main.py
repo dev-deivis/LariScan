@@ -225,7 +225,6 @@ def _resumen(r: models.Reporte) -> dict:
     }
 
 
-<<<<<<< HEAD
 # ── PDF ───────────────────────────────────────────────────────────────────────
 def _s(text) -> str:
     """Sanitize text to Latin-1 — replaces em/en dashes and any non-Latin-1 char."""
