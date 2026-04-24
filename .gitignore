@@ -1,5 +1,5 @@
 venv/
-*.pt
+# *.pt  # El modelo se necesita en el repo
 node_modules/
 frontend/.next/
 frontend/node_modules/
