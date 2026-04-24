@@ -1,14 +1,15 @@
 "use client"
 
 import { ReactNode } from "react"
-import { 
-  Camera, 
-  FileText, 
-  BarChart3, 
-  Settings, 
+import {
+  Camera,
+  FileText,
+  BarChart3,
+  Settings,
   CheckCircle2,
   Volume2,
-  User
+  User,
+  Shield,
 } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -27,6 +28,7 @@ const navItems = [
   { href: "/normas", icon: Settings, label: "Normas" },
   { href: "/validacion", icon: CheckCircle2, label: "Validar" },
   { href: "/reporte", icon: FileText, label: "Reporte" },
+  { href: "/auditoria", icon: Shield, label: "Auditoría" },
 ]
 
 export function AppShell({ 
