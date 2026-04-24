@@ -14,6 +14,17 @@ type Resultado = {
   tiene_defecto: boolean
 }
 
+type ResultadoColor = {
+  h: number
+  s: number
+  v: number
+  delta_h_deg: number
+  delta_s_pct: number
+  delta_v_pct: number
+  desviacion_pct: number
+  fuera_tolerancia: boolean
+}
+
 type Modo = "imagen" | "vivo" | "dashboard"
 
 interface Defecto {
@@ -60,6 +71,14 @@ export default function InspeccionActiva() {
   const [errorRed, setErrorRed] = useState(false)
   const [iniciando, setIniciando] = useState(false)
 
+  // AATCC 173: análisis de uniformidad de color
+  const [aatccActivo, setAatccActivo] = useState(false)
+  const [refColor, setRefColor] = useState<{ h: number; s: number; v: number } | null>(null)
+  const [resultadoColor, setResultadoColor] = useState<ResultadoColor | null>(null)
+  const [calibrando, setCalibrando] = useState(false)
+  const [contadorCalibracion, setContadorCalibracion] = useState(0)
+  const [contadorColorFuera, setContadorColorFuera] = useState(0)
+
   const [imagen, setImagen] = useState<string | null>(null)
   const [resultadoImagen, setResultadoImagen] = useState<Resultado | null>(null)
   const [cargandoImagen, setCargandoImagen] = useState(false)
@@ -73,6 +92,7 @@ export default function InspeccionActiva() {
         setZonaAdvertenciaPct(d.zona_advertencia_pct ?? 80)
         setAnchoRolloIn(d.ancho_rollo_in ?? 45)
         setLargoRolloYd(d.largo_rollo_yd ?? 120)
+        setAatccActivo(d.aatcc_173_activo ?? false)
       })
       .catch(() => {})
   }, [])
@@ -138,6 +158,9 @@ export default function InspeccionActiva() {
     setProcesando(true)
     const formData = new FormData()
     formData.append("file", new File([blob], "frame.jpg", { type: "image/jpeg" }))
+
+    // Análisis YOLO (siempre)
+    let tieneDefecto = false
     try {
       const res = await fetch("http://localhost:8000/analizar", {
         method: "POST",
@@ -146,6 +169,7 @@ export default function InspeccionActiva() {
       const data: Resultado = await res.json()
       setResultadoVivo(data)
       setErrorRed(false)
+      tieneDefecto = data.tiene_defecto
 
       if (data.tiene_defecto && !anteriorTeniaDefectoRef.current) {
         setContadorDefectos((c) => c + 1)
@@ -164,10 +188,70 @@ export default function InspeccionActiva() {
       anteriorTeniaDefectoRef.current = data.tiene_defecto
     } catch {
       setErrorRed(true)
-    } finally {
-      setProcesando(false)
     }
-  }, [reproducirBeep])
+
+    // Análisis AATCC 173 (si está activo)
+    const config = await fetch("http://localhost:8000/configuracion").then(r => r.json()).catch(() => ({}))
+    const framesCalibracion = config.aatcc_frames_calibracion ?? 5
+    const framesConfirmacion = config.aatcc_frames_confirmacion ?? 3
+
+    if (aatccActivo) {
+      if (refColor && !calibrando) {
+        // Ya hay referencia: comparar
+        try {
+          const formColor = new FormData()
+          formColor.append("file", new File([blob], "frame.jpg", { type: "image/jpeg" }))
+          formColor.append("ref_h", refColor.h.toString())
+          formColor.append("ref_s", refColor.s.toString())
+          formColor.append("ref_v", refColor.v.toString())
+
+          const resColor = await fetch("http://localhost:8000/analizar-color", {
+            method: "POST",
+            body: formColor,
+          })
+          const dataColor: ResultadoColor = await resColor.json()
+          setResultadoColor(dataColor)
+
+          if (dataColor.fuera_tolerancia) {
+            const nuevosFramesFuera = contadorColorFuera + 1
+            setContadorColorFuera(nuevosFramesFuera)
+            if (nuevosFramesFuera >= framesConfirmacion) {
+              reproducirBeep()
+            }
+          } else {
+            setContadorColorFuera(0)
+          }
+        } catch {
+          // Error en análisis de color, ignorar
+        }
+      } else if (calibrando) {
+        // Modo calibración
+        try {
+          const formCal = new FormData()
+          formCal.append("file", new File([blob], "frame.jpg", { type: "image/jpeg" }))
+
+          const resCal = await fetch("http://localhost:8000/analizar-color", {
+            method: "POST",
+            body: formCal,
+          })
+          const dataCal: ResultadoColor = await resCal.json()
+
+          setRefColor({ h: dataCal.h, s: dataCal.s, v: dataCal.v })
+          const nuevoContador = contadorCalibracion + 1
+          setContadorCalibracion(nuevoContador)
+
+          if (nuevoContador >= framesCalibracion) {
+            setCalibrando(false)
+            setContadorCalibracion(0)
+          }
+        } catch {
+          // Error en calibración
+        }
+      }
+    }
+
+    setProcesando(false)
+  }, [reproducirBeep, aatccActivo, refColor, calibrando, contadorCalibracion, contadorColorFuera])
 
   const iniciarCamara = useCallback(async (frontal: boolean) => {
     if (streamRef.current) {
@@ -184,13 +268,21 @@ export default function InspeccionActiva() {
       }
       setCamaraActiva(true)
       setResultadoVivo(null)
+      setResultadoColor(null)
       anteriorTeniaDefectoRef.current = false
+
+      if (aatccActivo) {
+        setRefColor(null)
+        setContadorCalibracion(0)
+        setContadorColorFuera(0)
+        setCalibrando(true)
+      }
     } catch {
       alert("No se pudo acceder a la cámara.")
     } finally {
       setIniciando(false)
     }
-  }, [])
+  }, [aatccActivo])
 
   const detenerCamara = useCallback(() => {
     loopActivoRef.current = false
@@ -341,7 +433,7 @@ export default function InspeccionActiva() {
           />
         )}
 
-        {modo === "vivo" && (
+{modo === "vivo" && (
           <ModoVideoVivo
             videoRef={videoRef}
             canvasRef={canvasRef}
@@ -358,6 +450,11 @@ export default function InspeccionActiva() {
             iniciarCamara={iniciarCamara}
             detenerCamara={detenerCamara}
             setCamaraFrontal={setCamaraFrontal}
+            aatccActivo={aatccActivo}
+            refColor={refColor}
+            resultadoColor={resultadoColor}
+            calibrando={calibrando}
+            contadorCalibracion={contadorCalibracion}
           />
         )}
 
@@ -705,7 +802,8 @@ function ModoImagen({
 function ModoVideoVivo({
   videoRef, canvasRef, camaraActiva, camaraFrontal, resultadoVivo, procesando,
   errorRed, iniciando, contadorDefectos, metrosInspeccionados, velocidadMpm,
-  setVelocidadMpm, iniciarCamara, detenerCamara, setCamaraFrontal
+  setVelocidadMpm, iniciarCamara, detenerCamara, setCamaraFrontal,
+  aatccActivo, refColor, resultadoColor, calibrando, contadorCalibracion
 }: {
   videoRef: React.RefObject<HTMLVideoElement | null>
   canvasRef: React.RefObject<HTMLCanvasElement | null>
@@ -722,6 +820,11 @@ function ModoVideoVivo({
   iniciarCamara: (frontal: boolean) => void
   detenerCamara: () => void
   setCamaraFrontal: (v: boolean) => void
+  aatccActivo: boolean
+  refColor: { h: number; s: number; v: number } | null
+  resultadoColor: ResultadoColor | null
+  calibrando: boolean
+  contadorCalibracion: number
 }) {
   const cambiarCamara = async () => {
     const nuevaFrontal = !camaraFrontal
@@ -731,6 +834,38 @@ function ModoVideoVivo({
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
+      {/* Barra AATCC 173 */}
+      {aatccActivo && (
+        <div className="bg-lino border-2 border-tierra rounded-xl p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-tierra">AATCC 173 — Color</span>
+            {calibrando ? (
+              <span className="text-xs bg-maiz text-obsidiana px-2 py-0.5 rounded animate-pulse">
+                Calibrando... {contadorCalibracion}/5
+              </span>
+            ) : refColor ? (
+              <span className="text-xs bg-nopal text-arena px-2 py-0.5 rounded">Calibrado</span>
+            ) : (
+              <span className="text-xs bg-humo/20 text-humo px-2 py-0.5 rounded">Sin calibrar</span>
+            )}
+          </div>
+          {resultadoColor && (
+            <>
+              <div className="h-3 bg-arena rounded-full overflow-hidden border border-tierra/30">
+                <div
+                  className={cn("h-full transition-all duration-300 rounded-full",
+                    resultadoColor.fuera_tolerancia ? "bg-red-500" : "bg-nopal")}
+                  style={{ width: `${resultadoColor.desviacion_pct}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-xs text-humo">
+                <span>Desviación: {resultadoColor.desviacion_pct}%</span>
+                <span>ΔH:{resultadoColor.delta_h_deg.toFixed(0)}° ΔS:{resultadoColor.delta_s_pct.toFixed(0)}% ΔV:{resultadoColor.delta_v_pct.toFixed(0)}%</span>
+              </div>
+            </>
+          )}
+        </div>
+      )}
       {/* Métricas en vivo */}
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-lino border-2 border-tierra rounded-xl px-4 py-3 text-center">

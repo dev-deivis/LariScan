@@ -1,23 +1,33 @@
 "use client"
 
-import { ReactNode } from "react"
-import { 
-  Camera, 
-  FileText, 
-  BarChart3, 
-  Settings, 
+import { useState, useEffect, ReactNode } from "react"
+import {
+  Camera,
+  FileText,
+  BarChart3,
+  Settings,
   CheckCircle2,
   Volume2,
-  User
+  User,
+  Pencil,
 } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 
+const STORAGE_KEY = "lariscan_sesion_v1"
+
+export interface DatosSesion {
+  inspector: string
+  turno: string
+  rolloNum: string
+  proveedor: string
+  material: string
+}
+
 interface AppShellProps {
   children: ReactNode
-  inspectorName?: string
-  turno?: string
+  onSesionActualizada?: (sesion: DatosSesion) => void
 }
 
 const navItems = [
@@ -29,35 +39,160 @@ const navItems = [
   { href: "/reporte", icon: FileText, label: "Reporte" },
 ]
 
-export function AppShell({ 
-  children, 
-  inspectorName = "María García",
-  turno = "Turno Matutino"
-}: AppShellProps) {
+const TURNOS = ["Matutino", "Vespertino", "Nocturno"]
+
+const FORM_VACIO: DatosSesion = {
+  inspector: "",
+  turno: "Matutino",
+  rolloNum: "",
+  proveedor: "",
+  material: "",
+}
+
+export function AppShell({ children, onSesionActualizada }: AppShellProps) {
   const pathname = usePathname()
-  
-  const currentTime = new Date().toLocaleTimeString('es-MX', { 
-    hour: '2-digit', 
-    minute: '2-digit',
-    hour12: true 
+  const [sesion, setSesion] = useState<DatosSesion | null>(null)
+  const [mostrarForm, setMostrarForm] = useState(false)
+  const [draft, setDraft] = useState<DatosSesion>(FORM_VACIO)
+
+  useEffect(() => {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (stored) {
+      const s: DatosSesion = JSON.parse(stored)
+      setSesion(s)
+      setDraft(s)
+    } else {
+      const year = new Date().getFullYear()
+      const num = String(Math.floor(Math.random() * 9000) + 1000)
+      setDraft((f) => ({ ...f, rolloNum: `R-${year}-${num}` }))
+      setMostrarForm(true)
+    }
+  }, [])
+
+  const guardar = () => {
+    if (!draft.inspector.trim() || !draft.proveedor.trim() || !draft.rolloNum.trim()) return
+    const s = { ...draft, inspector: draft.inspector.trim(), proveedor: draft.proveedor.trim() }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
+    setSesion(s)
+    setMostrarForm(false)
+    onSesionActualizada?.(s)
+  }
+
+  const editarSesion = () => {
+    if (sesion) setDraft(sesion)
+    setMostrarForm(true)
+  }
+
+  const currentTime = new Date().toLocaleTimeString("es-MX", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
   })
 
   return (
     <div className="min-h-screen flex flex-col">
+      {/* Modal de inicio de sesión */}
+      {mostrarForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-obsidiana/90 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-arena rounded-3xl p-8 border-4 border-tierra space-y-5 shadow-2xl">
+            <div className="text-center">
+              <div className="w-14 h-14 rounded-full bg-tierra flex items-center justify-center mx-auto mb-3">
+                <User className="w-7 h-7 text-arena" />
+              </div>
+              <h2 className="font-serif text-2xl font-bold text-tierra">Iniciar inspección</h2>
+              <p className="text-humo text-sm mt-1">Ingresa los datos del inspector y del rollo</p>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-humo mb-1 uppercase tracking-wide">
+                  Nombre del inspector *
+                </label>
+                <input
+                  type="text"
+                  value={draft.inspector}
+                  onChange={(e) => setDraft((f) => ({ ...f, inspector: e.target.value }))}
+                  placeholder="Ej. María García"
+                  className="w-full px-4 py-2.5 bg-lino border-2 border-tierra/40 rounded-xl focus:border-tierra focus:outline-none text-obsidiana"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-humo mb-1 uppercase tracking-wide">
+                  Turno
+                </label>
+                <select
+                  value={draft.turno}
+                  onChange={(e) => setDraft((f) => ({ ...f, turno: e.target.value }))}
+                  className="w-full px-4 py-2.5 bg-lino border-2 border-tierra/40 rounded-xl focus:border-tierra focus:outline-none text-obsidiana"
+                >
+                  {TURNOS.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-humo mb-1 uppercase tracking-wide">
+                  Número de rollo *
+                </label>
+                <input
+                  type="text"
+                  value={draft.rolloNum}
+                  onChange={(e) => setDraft((f) => ({ ...f, rolloNum: e.target.value }))}
+                  placeholder="Ej. R-2024-0001"
+                  className="w-full px-4 py-2.5 bg-lino border-2 border-tierra/40 rounded-xl focus:border-tierra focus:outline-none font-mono text-obsidiana"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-humo mb-1 uppercase tracking-wide">
+                  Proveedor *
+                </label>
+                <input
+                  type="text"
+                  value={draft.proveedor}
+                  onChange={(e) => setDraft((f) => ({ ...f, proveedor: e.target.value }))}
+                  placeholder="Ej. Textiles del Valle"
+                  className="w-full px-4 py-2.5 bg-lino border-2 border-tierra/40 rounded-xl focus:border-tierra focus:outline-none text-obsidiana"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-humo mb-1 uppercase tracking-wide">
+                  Material / composición
+                </label>
+                <input
+                  type="text"
+                  value={draft.material}
+                  onChange={(e) => setDraft((f) => ({ ...f, material: e.target.value }))}
+                  placeholder="Ej. Algodón 100%"
+                  className="w-full px-4 py-2.5 bg-lino border-2 border-tierra/40 rounded-xl focus:border-tierra focus:outline-none text-obsidiana"
+                />
+              </div>
+            </div>
+
+            <button
+              onClick={guardar}
+              disabled={!draft.inspector.trim() || !draft.proveedor.trim() || !draft.rolloNum.trim()}
+              className="w-full py-3 bg-tierra text-arena rounded-xl font-semibold text-base hover:bg-tierra/90 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Iniciar inspección
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="bg-lino border-b-2 border-tierra px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          {/* Logo LáriScan */}
           <div className="flex items-center gap-2">
             <div className="relative w-10 h-10">
-              {/* Ícono abstracto: ojo/lente con tejido */}
               <svg viewBox="0 0 40 40" className="w-full h-full">
-                {/* Tejido de fondo */}
                 <pattern id="weave" width="4" height="4" patternUnits="userSpaceOnUse">
                   <path d="M0 2h4M2 0v4" stroke="#B5622A" strokeWidth="0.5" fill="none" opacity="0.6"/>
                 </pattern>
                 <circle cx="20" cy="20" r="18" fill="url(#weave)" stroke="#7C4A2D" strokeWidth="2"/>
-                {/* Ojo/lente */}
                 <ellipse cx="20" cy="20" rx="10" ry="7" fill="none" stroke="#7C4A2D" strokeWidth="2"/>
                 <circle cx="20" cy="20" r="4" fill="#7C4A2D"/>
                 <circle cx="18" cy="18" r="1.5" fill="#F2E8D5"/>
@@ -70,19 +205,30 @@ export function AppShell({
         </div>
 
         <div className="flex items-center gap-6">
-          {/* Indicador de audio */}
           <button className="p-2 hover:bg-arena rounded-lg transition-colors" aria-label="Audio activo">
             <Volume2 className="w-5 h-5 text-tierra" />
           </button>
-          
-          {/* Info del inspector */}
+
           <div className="flex items-center gap-3 text-right">
             <div>
-              <p className="text-sm font-semibold text-obsidiana">{inspectorName}</p>
-              <p className="text-xs text-humo">{turno} • {currentTime}</p>
+              <p className="text-sm font-semibold text-obsidiana">
+                {sesion?.inspector ?? "—"}
+              </p>
+              <p className="text-xs text-humo">
+                {sesion?.turno ?? "Sin turno"} • {currentTime}
+              </p>
             </div>
-            <div className="w-10 h-10 rounded-full bg-tierra flex items-center justify-center">
-              <User className="w-5 h-5 text-arena" />
+            <div className="flex items-center gap-1">
+              <button
+                onClick={editarSesion}
+                className="p-1.5 hover:bg-arena rounded-lg transition-colors"
+                aria-label="Editar datos de sesión"
+              >
+                <Pencil className="w-4 h-4 text-tierra" />
+              </button>
+              <div className="w-10 h-10 rounded-full bg-tierra flex items-center justify-center">
+                <User className="w-5 h-5 text-arena" />
+              </div>
             </div>
           </div>
         </div>
@@ -90,7 +236,6 @@ export function AppShell({
 
       {/* Main content area */}
       <div className="flex flex-1">
-        {/* Sidebar navigation - visible on tablet and up */}
         <nav className="hidden md:flex flex-col w-20 lg:w-56 bg-lino border-r-2 border-tierra py-4">
           {navItems.map((item) => {
             const isActive = pathname === item.href
@@ -119,7 +264,6 @@ export function AppShell({
           })}
         </nav>
 
-        {/* Main content */}
         <main className="flex-1 p-4 md:p-6 overflow-auto pb-24 md:pb-6">
           {children}
         </main>
